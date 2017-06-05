@@ -48,25 +48,6 @@ describe "Test Monitoring API" do
     end
   end
 
-  it 'can retrieve dlq stats' do
-    logstash_service = @fixture.get_service("logstash")
-    logstash_service.start_with_stdin
-    logstash_service.wait_for_logstash
-    Stud.try(max_retry.times, [StandardError, RSpec::Expectations::ExpectationNotMetError]) do
-      # node_stats can fail if the stats subsystem isn't ready
-      result = logstash_service.monitoring_api.node_stats rescue nil
-      expect(result).not_to be_nil
-      # we use fetch here since we want failed fetches to raise an exception
-      # and trigger the retry block
-      queue_stats = result.fetch('pipelines').fetch('main')['dead_letter_queue']
-      if logstash_service.settings.get("dead_letter_queue.enable")
-        expect(queue_stats['queue_size_in_bytes']).not_to be_nil
-      else
-        expect(queue_stats).to be nil
-      end
-    end
-  end
-
   it "can retrieve queue stats" do
     logstash_service = @fixture.get_service("logstash")
     logstash_service.start_with_stdin
@@ -116,7 +97,7 @@ describe "Test Monitoring API" do
       logging_put_assert logstash_service.monitoring_api.logging_put({"logger." => "INFO"})
       logging_get_assert logstash_service, "INFO", "TRACE"
 
-      #package logger 
+      #package logger
       logging_put_assert logstash_service.monitoring_api.logging_put({"logger.logstash.agent" => "DEBUG"})
       expect(logstash_service.monitoring_api.logging_get["loggers"]["logstash.agent"]).to eq ("DEBUG")
       logging_put_assert logstash_service.monitoring_api.logging_put({"logger.logstash.agent" => "INFO"})
