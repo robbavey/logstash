@@ -33,7 +33,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static org.logstash.common.io.RecordIOWriter.RECORD_HEADER_SIZE;
@@ -54,6 +57,7 @@ public final class DeadLetterQueueWriter implements Closeable {
     private int currentSegmentIndex;
     private Timestamp lastEntryTimestamp;
     private boolean open;
+    private ConcurrentSkipListSet<Path> segments;
 
     public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize) throws IOException {
         // ensure path exists, create it otherwise.

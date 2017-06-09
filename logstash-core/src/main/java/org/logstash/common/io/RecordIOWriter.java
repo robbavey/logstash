@@ -69,6 +69,7 @@ public final class RecordIOWriter implements Closeable {
     private final FileChannel channel;
     private int posInBlock;
     private int currentBlockIdx;
+    private Path path;
 
     static final int BLOCK_SIZE = 32 * 1024; // package-private for tests
     static final int RECORD_HEADER_SIZE = 13;
@@ -79,6 +80,7 @@ public final class RecordIOWriter implements Closeable {
         this.posInBlock = 0;
         this.currentBlockIdx = 0;
         recordsFile.toFile().createNewFile();
+        this.path = recordsFile;
         this.channel = FileChannel.open(recordsFile, StandardOpenOption.WRITE);
         this.channel.write(ByteBuffer.wrap(new byte[] { VERSION }));
     }
@@ -143,5 +145,9 @@ public final class RecordIOWriter implements Closeable {
     @Override
     public void close() throws IOException {
         channel.close();
+    }
+
+    public Path getPath(){
+        return path;
     }
 }
