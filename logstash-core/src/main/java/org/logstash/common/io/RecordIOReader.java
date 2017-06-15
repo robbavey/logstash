@@ -80,6 +80,19 @@ public final class RecordIOReader implements Closeable {
         int lowBlock = 0;
         int highBlock = (int) (channel.size() - VERSION_SIZE) / BLOCK_SIZE;
 
+//        if (highBlock == 0) {
+//            System.out.println(channel.size() + " is 0");
+//            System.out.println("high block is 0");
+//            return null;
+//        }
+
+        // Test the high block first - if the time is after the high block, then it can be discarded
+        seekToBlock(highBlock);
+        T lastEvent = keyExtractor.apply(readEvent());
+        if (keyComparator.compare(lastEvent, target) < 0){
+            return null;
+        }
+
         while (lowBlock < highBlock) {
             int middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
             seekToBlock(middle);

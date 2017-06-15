@@ -159,6 +159,22 @@
 # Flag to turn on dead-letter queue.
 #
 # dead_letter_queue.enable: false
+#
+# Maximum size per dead-letter queue instance.
+# dead_letter_queue.max_bytes: 1024mb
+dead_letter_queue.max_bytes: 3kb
+#
+# Maximum age of dead-letter queue entries.
+# dead_letter_queue.max_age: 30d
+dead_letter_queue.max_age: 5m
+
+
+# Frequency that the dead letter queue cleaner runs
+# dead_letter_queue.clean_interval: 1m
+dead_letter_queue.clean_interval: 30s
+#
+#
+#
 
 # If using dead_letter_queue.enable: true, the maximum size of each dead letter queue. Entries
 # will be dropped if they would increase the size of the dead letter queue beyond this setting.

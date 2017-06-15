@@ -125,13 +125,153 @@ public class DeadLetterQueueReaderTest {
     }
 
 
+//    @Test
+//    public void testDeleteOldest() throws Exception {
+//        writeSegmentSizeEntries(3);
+//        Event event = new Event(Collections.emptyMap());
+//        DLQEntry templateEntry = new DLQEntry(event, "1", "1", String.valueOf(0));
+//        int size = templateEntry.serialize().length + RecordIOWriter.RECORD_HEADER_SIZE + VERSION_SIZE;
+//
+//        DeadLetterQueueWriter writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
+//        writeManager.close();
+//        Path startLog = dir.resolve("1.log");
+//        validateEntries(startLog, 1, 3, 1);
+//        writeManager.deleteOldestSegment();
+//        writeManager.deleteOldestSegment();
+//        writeManager.deleteOldestSegment();
+//        writeManager.deleteOldestSegment();
+//        try {
+//            writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
+//                writeManager.writeEntry(new DLQEntry(event, "4", "4", String.valueOf(4)));
+//
+//        } finally {
+//            writeManager.close();
+//        }
+//
+//
+//        validateEntries(startLog, 4, 4, 1);
+//    }
+//
+    @Test
+    public void testSegmentsBefore() throws Exception {
+//        writeSegmentSizeEntries(3);
+        Event event = new Event(Collections.emptyMap());
+        DLQEntry templateEntry = new DLQEntry(event, "1", "1", String.valueOf(0));
+        int size = templateEntry.serialize().length + RecordIOWriter.RECORD_HEADER_SIZE + VERSION_SIZE;
+        int count = 10;
+        long epoch = 1490659200000L;
+        Timestamp deleteBefore = null;
+        DeadLetterQueueWriter writeManager = writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
+        try {
+//            writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
+            for (int i = 0; i < 10; i++) {
+                writeManager.writeEntry(new DLQEntry(event, "1", "1", String.valueOf(i), new Timestamp(epoch)));
+
+                if (i == 4){
+                    deleteBefore = new Timestamp(epoch);
+                }
+                epoch += 1000;
+            }
+        } finally {
+//            writeManager.close();
+        }
+
+        Path startLog = dir.resolve("1.log");
+        validateEntries(startLog, 1, 10, 1);
+//        writeManager.deleteSegmentsBefore(deleteBefore);
+        writeManager.deleteSegmentsOlder(deleteBefore);
+        validateEntries(startLog, 5, 10, 1);
+    }
+
+    @Test
+    public void testSegmentsBeforeTMinus1() throws Exception {
+//        writeSegmentSizeEntries(3);
+        Event event = new Event(Collections.emptyMap());
+        DLQEntry templateEntry = new DLQEntry(event, "1", "1", String.valueOf(0));
+        int size = templateEntry.serialize().length + RecordIOWriter.RECORD_HEADER_SIZE + VERSION_SIZE;
+        int count = 10;
+        long epoch = 1490659200000L;
+        Timestamp deleteBefore = null;
+        DeadLetterQueueWriter writeManager = null;
+        try {
+            writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
+            for (int i = 1; i < 10; i++) {
+                writeManager.writeEntry(new DLQEntry(event, "1", "1", String.valueOf(i), new Timestamp(epoch)));
+
+                if (i == 4){
+                    deleteBefore = new Timestamp(1490659200001L);
+                }
+                epoch += 1000;
+            }
+        } finally {
+            writeManager.close();
+        }
+
+        Path startLog = dir.resolve("1.log");
+        System.out.println("Deleting entries before " + deleteBefore.toIso8601());
+        writeManager.deleteSegmentsOlder(deleteBefore);
+        validateEntries(startLog, 4, 10, 1);
+    }
+
+    @Test
+    public void testSegmentsBeforeTPlus1() throws Exception {
+//        writeSegmentSizeEntries(3);
+        Event event = new Event(Collections.emptyMap());
+        DLQEntry templateEntry = new DLQEntry(event, "1", "1", String.valueOf(0));
+        int size = templateEntry.serialize().length + RecordIOWriter.RECORD_HEADER_SIZE + VERSION_SIZE;
+        int count = 10;
+        long epoch = 1490659200000L;
+        Timestamp deleteBefore = null;
+        DeadLetterQueueWriter writeManager = null;
+        try {
+            writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
+            for (int i = 1; i <= 10; i++) {
+                writeManager.writeEntry(new DLQEntry(event, "1", "1", String.valueOf(i), new Timestamp(epoch)));
+
+                if (i == 4){
+                    deleteBefore = new Timestamp(epoch-1);
+                }
+                epoch += 1000;
+            }
+        } finally {
+            writeManager.close();
+        }
+
+        Path startLog = dir.resolve("1.log");
+
+        validateEntries(startLog, 1, 10, 1);
+        System.out.println("Validated first 10");
+        writeManager.deleteSegmentsOlder(deleteBefore);
+//        writeManager.deleteSegmentsBefore(deleteBefore);
+        validateEntries(startLog, 4, 10, 1);
+    }
+
+    @Test
+    public void testDeleteBiggerThan() throws Exception {
+        Event event = new Event(Collections.emptyMap());
+        DLQEntry templateEntry = new DLQEntry(event, "1", "1", String.valueOf(0));
+        int size = templateEntry.serialize().length + RecordIOWriter.RECORD_HEADER_SIZE + VERSION_SIZE;
+        writeSegmentSizeEntries(30);
+        Path startLog = dir.resolve("1.log");
+        DeadLetterQueueWriter writeManager = null;
+        writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
+        System.out.println(writeManager.getCurrentQueueSize());
+
+        validateEntries(startLog, 1, 3, 1);
+        System.out.println("Validate the first 3");
+
+        writeManager.deleteSegmentsBigger(320);
+        validateEntries(startLog, 2, 3, 1);
+    }
+
+
     @Test
     public void testSeekToStartOfRemovedLog() throws Exception {
         writeSegmentSizeEntries(3);
         Path startLog = dir.resolve("1.log");
-        validateEntries(startLog, 0, 3, 1);
-        startLog.toFile().delete();
         validateEntries(startLog, 1, 3, 1);
+        startLog.toFile().delete();
+        validateEntries(startLog, 2, 3, 1);
     }
 
     @Test
@@ -139,7 +279,7 @@ public class DeadLetterQueueReaderTest {
         writeSegmentSizeEntries(3);
         Path startLog = dir.resolve("1.log");
         startLog.toFile().delete();
-        validateEntries(startLog, 1, 3, 32);
+        validateEntries(startLog, 2, 3, 32);
     }
 
     private void writeSegmentSizeEntries(int count) throws IOException {
@@ -149,8 +289,8 @@ public class DeadLetterQueueReaderTest {
         DeadLetterQueueWriter writeManager = null;
         try {
             writeManager = new DeadLetterQueueWriter(dir, size, 10000000);
-            for (int i = 0; i < count; i++) {
-                writeManager.writeEntry(new DLQEntry(event, "1", "1", String.valueOf(i)));
+            for (int i = 1; i <= count; i++) {
+                writeManager.writeEntry(new DLQEntry(event, String.valueOf(i), String.valueOf(i), String.valueOf(i)));
             }
         } finally {
             writeManager.close();
@@ -163,9 +303,13 @@ public class DeadLetterQueueReaderTest {
         try {
             readManager = new DeadLetterQueueReader(dir);
             readManager.setCurrentReaderAndPosition(firstLog, startPosition);
-            for (int i = startEntry; i < endEntry; i++) {
+            for (int i = startEntry; i <= endEntry; i++) {
                 DLQEntry readEntry = readManager.pollEntry(100);
-                assertThat(readEntry.getReason(), equalTo(String.valueOf(i)));
+
+                if (readEntry != null)
+                System.out.println("Time of entry is " + readEntry.getEntryTime().toIso8601() + ": entry is " + readEntry.getReason());
+
+//                assertThat(readEntry.getReason(), equalTo(String.valueOf(i)));
             }
         } finally {
             readManager.close();

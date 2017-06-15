@@ -25,18 +25,20 @@ import org.logstash.DLQEntry;
 import org.logstash.Event;
 import org.logstash.Timestamp;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentSkipListSet;
+
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.logstash.common.io.RecordIOWriter.RECORD_HEADER_SIZE;
@@ -57,6 +59,7 @@ public final class DeadLetterQueueWriter implements Closeable {
     private int currentSegmentIndex;
     private Timestamp lastEntryTimestamp;
     private boolean open;
+
     private ConcurrentSkipListSet<Path> segments;
 
     public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize) throws IOException {
@@ -79,15 +82,78 @@ public final class DeadLetterQueueWriter implements Closeable {
         this.maxQueueSize = maxQueueSize;
         this.currentQueueSize = new LongAdder();
         this.currentQueueSize.add(getStartupQueueSize());
-
         currentSegmentIndex = getSegmentPaths(queuePath)
                 .map(s -> s.getFileName().toString().split("\\.")[0])
                 .mapToInt(Integer::parseInt)
                 .max().orElse(0);
+        this.segments = new ConcurrentSkipListSet<>((p1, p2) -> {
+            Function<Path, Integer> id = (p) -> Integer.parseInt(p.getFileName().toString().split("\\.")[0]);
+            return id.apply(p1).compareTo(id.apply(p2));
+        });
+        segments.addAll(getSegmentPaths(queuePath).collect(Collectors.toList()));
         this.currentWriter = nextWriter();
         this.lastEntryTimestamp = Timestamp.now();
         this.open = true;
     }
+
+    private boolean deleteSegment(Path segment){
+        File segmentFile = segment.toFile();
+        long size = segmentFile.length();
+        segments.remove(segment);
+        if (segment.toFile().delete()){
+            currentQueueSize.add(0 - size);
+            return true;
+        }
+        return false;
+    }
+
+    static Predicate<Path> segmentPrecedes(Timestamp timestamp) {
+        return p -> {
+            RecordIOReader reader = null;
+            try {
+                reader = new RecordIOReader(p);
+                byte[] event = reader.seekToNextEventPosition(timestamp, entryTimeFromDLQEntry(), Timestamp::compareTo);
+                return event == null;
+            } catch (IOException e){
+                return false;
+            } finally {
+                if (reader != null) {
+                    try{
+                        reader.close();
+                    } catch (IOException ignored) {}
+                }
+            }
+        };
+    }
+
+    private static Function<byte[], Timestamp> entryTimeFromDLQEntry() {
+        return (b) ->
+        {
+            try {
+                return DLQEntry.deserialize(b).getEntryTime();
+            } catch (IOException e) {
+                return null;
+            }
+        };
+    }
+
+    private Predicate<Path> cumulativeSegmentSizeIsGreaterThan(long maxQueueSize){
+        return p -> currentQueueSize.longValue() > maxQueueSize;
+    }
+
+    private int deleteWhile(Predicate<Path> predicate) throws Exception {
+        int count = 0;
+        for (Path segment: segments){
+            if (predicate.test(segment)){
+                deleteSegment(segment);
+                count++;
+            }else{
+                break;
+            }
+        }
+        return count;
+    }
+
 
     /**
      * Constructor for Writer that uses defaults
@@ -112,9 +178,14 @@ public final class DeadLetterQueueWriter implements Closeable {
     }
 
     private RecordIOWriter nextWriter() throws IOException {
-        RecordIOWriter recordIOWriter = new RecordIOWriter(queuePath.resolve(String.format(SEGMENT_FILE_PATTERN, ++currentSegmentIndex)));
+        return new RecordIOWriter(newSegment());
+    }
+
+    private Path newSegment() {
+        Path segmentName = queuePath.resolve(String.format(SEGMENT_FILE_PATTERN, ++currentSegmentIndex));
+        this.segments.add(segmentName);
         currentQueueSize.increment();
-        return recordIOWriter;
+        return segmentName;
     }
 
     static Stream<Path> getSegmentPaths(Path path) throws IOException {
@@ -169,4 +240,86 @@ public final class DeadLetterQueueWriter implements Closeable {
     public long getCurrentQueueSize() {
         return currentQueueSize.longValue();
     }
+
+
+    /**
+     * Deletes segments that only contain entries older than the timestamp given.
+     * @param timestamp
+     * @return number of segments deleted.
+     * @throws Exception
+     */
+    public int deleteSegmentsOlder(Timestamp timestamp) throws Exception {
+        return deleteWhile(segmentPrecedes(timestamp));
+    }
+
+    /**
+     * Deletes segments over the size of that given.
+     * @param size
+     * @return number of segments deleted.
+     * @throws Exception
+     */
+    public int deleteSegmentsBigger(long size) throws Exception {
+        return deleteWhile(cumulativeSegmentSizeIsGreaterThan(size));
+    }
+
+
+//    private void deleteSegmentsBefore(Path path){
+//        segments.headSet(path).forEach(this::deleteSegment);
+//    }
+//
+//    public void deleteSegmentsGreaterThan(long size){
+//        for (Path segment: segments){
+//            if (currentQueueSize.longValue() < size){
+//                return;
+//            }
+//            if (segment != currentWriter){
+//                deleteSegment(segment);
+//            }else{
+//                return;
+//            }
+//        }
+//    }
+//
+//    public void deleteSegmentsOlderThan(int retentionPeriod, TimeUnit retentionUnit) throws IOException {
+//        DateTime dt = DateTime.now();
+//        // Making the simplifying assumption that days does not take DST into account.
+//        dt.minus(retentionUnit.toMillis(retentionPeriod));
+//        deleteSegmentsBefore(new Timestamp(dt));
+//    }
+//
+//    public void deleteSegmentsBefore(Timestamp timestamp) throws IOException {
+//        segmentPreceding(timestamp).ifPresent(this::deleteSegmentsBefore);
+//    }
+//
+//    private Optional<Path> segmentPreceding(Timestamp timestamp) throws IOException {
+//        // Refresh segments
+//        segments.addAll(getSegmentPaths(queuePath).collect(Collectors.toList()));
+//        for (Path segment : segments) {
+//
+//            RecordIOReader currentReader = new RecordIOReader(segment);
+//            byte[] event = currentReader.seekToNextEventPosition(timestamp, (b) -> {
+//                try {
+//                    return DLQEntry.deserialize(b).getEntryTime();
+//                } catch (IOException e) {
+//                    return null;
+//                }
+//            }, Timestamp::compareTo);
+//            if (event != null) {
+//                return Optional.of(segment);
+//            }
+//            currentReader.close();
+//        }
+//        return Optional.empty();
+//    }
+//
+//
+
+//    public boolean deleteOldestSegment() throws IOException, InterruptedException {
+//        Optional<Path> oldest = getOldestNonCurrentWriter();
+//        if (!oldest.isPresent()){
+//            pollNewSegments(200);
+//            oldest = getOldestNonCurrentWriter();
+//        }
+//        return oldest.map(this::deleteSegment).orElse(false);
+//    }
 }
