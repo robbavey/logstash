@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Random;
 import java.util.function.Function;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -172,19 +173,30 @@ public class RecordIOWriterTest {
 
     @Test
     public void testFind() throws Exception {
-
+        Random random = new Random();
         RecordIOWriter writer = new RecordIOWriter(file);
         RecordIOReader reader = new RecordIOReader(file);
         ByteBuffer intBuffer = ByteBuffer.wrap(new byte[4]);
+        int size = 0;
         for (int i = 0; i < 20000; i++) {
             intBuffer.rewind();
             intBuffer.putInt(i);
-            writer.writeEvent(intBuffer.array());
+            size += writer.writeEvent(intBuffer.array());
         }
 
-        Function<byte[], Object> toInt = (b) -> ByteBuffer.wrap(b).getInt();
-        reader.seekToNextEventPosition(34, toInt, (o1, o2) -> ((Integer) o1).compareTo((Integer) o2));
+        Function<byte[], Object> toInt = (b) -> {
+            if (b != null) {
+                return ByteBuffer.wrap(b).getInt();
+            }
+            else {
+                return new Integer(4);
+            }
+        };
+
+        int position = random.nextInt(20000);
+        System.out.println("Searchubg for " + position);
+        reader.seekToNextEventPosition(position, toInt, (o1, o2) -> ((Integer) o1).compareTo((Integer) o2));
         int nextVal = (int) toInt.apply(reader.readEvent());
-        assertThat(nextVal, equalTo(34));
+        assertThat(nextVal, equalTo(position));
     }
 }

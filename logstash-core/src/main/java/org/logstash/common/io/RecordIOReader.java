@@ -35,9 +35,7 @@ import static org.logstash.common.io.RecordIOWriter.RECORD_HEADER_SIZE;
 import static org.logstash.common.io.RecordIOWriter.VERSION;
 import static org.logstash.common.io.RecordIOWriter.VERSION_SIZE;
 
-/**
- */
-public final class RecordIOReader implements Closeable {
+public class RecordIOReader implements Closeable {
 
     private final FileChannel channel;
     private final ByteBuffer currentBlock;
@@ -78,25 +76,15 @@ public final class RecordIOReader implements Closeable {
     public <T> byte[] seekToNextEventPosition(T target, Function<byte[], T> keyExtractor, Comparator<T> keyComparator) throws IOException {
         int matchingBlock = UNSET;
         int lowBlock = 0;
-        int highBlock = (int) (channel.size() - VERSION_SIZE) / BLOCK_SIZE;
+        int highBlock = finalBlockPosition();
 
-//        if (highBlock == 0) {
-//            System.out.println(channel.size() + " is 0");
-//            System.out.println("high block is 0");
-//            return null;
-//        }
-
-        // Test the high block first - if the time is after the high block, then it can be discarded
-        seekToBlock(highBlock);
-        T lastEvent = keyExtractor.apply(readEvent());
-        if (keyComparator.compare(lastEvent, target) < 0){
-            return null;
-        }
-
+        int middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
         while (lowBlock < highBlock) {
-            int middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
+            middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
             seekToBlock(middle);
             T found = keyExtractor.apply(readEvent());
+            System.out.println("Found is " + found + " Target is " + target);
+
             int compare = keyComparator.compare(found, target);
             if (compare > 0) {
                 highBlock = middle - 1;

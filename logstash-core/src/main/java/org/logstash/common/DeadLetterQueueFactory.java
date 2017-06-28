@@ -20,11 +20,13 @@ package org.logstash.common;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.logstash.common.io.DeadLetterQueueSettings;
 import org.logstash.common.io.DeadLetterQueueWriter;
 
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * This class manages static collection of {@link DeadLetterQueueWriter} instances that
@@ -43,6 +45,17 @@ public class DeadLetterQueueFactory {
     private DeadLetterQueueFactory() {
     }
 
+
+    public static DeadLetterQueueWriter getWriter(String id, DeadLetterQueueSettings settings){
+        return REGISTRY.computeIfAbsent(id, k -> {
+            try{
+                return new DeadLetterQueueWriter(settings);
+            } catch (IOException e) {
+            logger.error("unable to create dead letter queue writer", e);
+        }
+        return null;
+        });
+    }
     /**
      * Retrieves an existing {@link DeadLetterQueueWriter} associated with the given id, or
      * opens a new one to be returned. It is the retrievers responsibility to close these newly
@@ -58,7 +71,14 @@ public class DeadLetterQueueFactory {
     public static DeadLetterQueueWriter getWriter(String id, String dlqPath, long maxQueueSize) {
         return REGISTRY.computeIfAbsent(id, k -> {
             try {
-                return new DeadLetterQueueWriter(Paths.get(dlqPath, k), MAX_SEGMENT_SIZE_BYTES, maxQueueSize);
+                DeadLetterQueueSettings dlqSettings = new DeadLetterQueueSettings.Builder()
+                                                                                 .queuePath(Paths.get(dlqPath, k))
+                                                                                 .maxQueueSize(Long.MAX_VALUE)
+                                                                                 .maxSegmentSize(MAX_SEGMENT_SIZE_BYTES)
+                                                                                 .maxRetention(5, TimeUnit.DAYS)
+                                                                                 .build();
+//                return new DeadLetterQueueWriter(Paths.get(dlqPath, k), MAX_SEGMENT_SIZE_BYTES, Long.MAX_VALUE);
+                return new DeadLetterQueueWriter(dlqSettings);
             } catch (IOException e) {
                 logger.error("unable to create dead letter queue writer", e);
             }

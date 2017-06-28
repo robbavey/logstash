@@ -44,13 +44,21 @@ module LogStash; module Util
 
   class DeadLetterQueueFactory
     java_import org.logstash.common.DeadLetterQueueFactory
+    java_import org.logstash.common.io.DeadLetterQueueSettings
 
     def self.get(pipeline_id)
       if LogStash::SETTINGS.get("dead_letter_queue.enable")
-        return DeadLetterQueueWriter.new(
-          DeadLetterQueueFactory.getWriter(pipeline_id, LogStash::SETTINGS.get("path.dead_letter_queue"), LogStash::SETTINGS.get('dead_letter_queue.max_bytes')))
+        settings_builder = DeadLetterQueueSettings.Builder.new
+        settings = settings_builder.base_path(LogStash::SETTINGS.get("path.dead_letter_queue"))
+                         .pipeline_id(pipeline_id)
+                         .max_segment_size(1024768)
+                         .max_retention_milliseconds(100000000)
+                         .max_queue_size(10000000)
+                         .build
+        # return DeadLetterQueueFactory.getWriter(pipeline_id, LogStash::SETTINGS.get("path.dead_letter_queue"))
+        return DeadLetterQueueFactory.get_writer(pipeline_id, settings)
       else
-        return DeadLetterQueueWriter.new(nil)
+        return DummyDeadLetterQueueWriter.new
       end
     end
 
