@@ -72,7 +72,8 @@ public class DeadLetterQueueFactory {
         return REGISTRY.computeIfAbsent(id, k -> {
             try {
                 DeadLetterQueueSettings dlqSettings = new DeadLetterQueueSettings.Builder()
-                                                                                 .queuePath(Paths.get(dlqPath, k))
+                                                                                 .basePath(dlqPath)
+                                                                                 .pipelineId(k)
                                                                                  .maxQueueSize(Long.MAX_VALUE)
                                                                                  .maxSegmentSize(MAX_SEGMENT_SIZE_BYTES)
                                                                                  .maxRetention(5, TimeUnit.DAYS)

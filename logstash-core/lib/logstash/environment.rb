@@ -54,6 +54,10 @@ module LogStash
             Setting::Numeric.new("queue.checkpoint.writes", 1024), # 0 is unlimited
             Setting::Numeric.new("queue.checkpoint.interval", 1000), # 0 is no time-based checkpointing
             Setting::Boolean.new("dead_letter_queue.enable", false),
+            Setting::Bytes.new("dead_letter_queue.size.threshold", "1024mb"),
+            Setting::TimeValue.new("dead_letter_queue.age.threshold", "-1"),
+            Setting::Bytes.new("dead_letter_queue.segment_max_bytes", "10mb"),
+            Setting::TimeValue.new("dead_letter_queue.clean_interval", "5m"),
             Setting::Bytes.new("dead_letter_queue.max_bytes", "1024mb"),
             Setting::TimeValue.new("slowlog.threshold.warn", "-1"),
             Setting::TimeValue.new("slowlog.threshold.info", "-1"),

@@ -22,6 +22,7 @@ import java.io.Closeable;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.joda.time.DateTime;
+import org.jruby.RubyProcess;
 import org.logstash.DLQEntry;
 import org.logstash.Event;
 import org.logstash.Timestamp;
@@ -68,6 +69,9 @@ public final class DeadLetterQueueWriter implements Closeable {
 
     private ConcurrentSkipListSet<Path> segments;
 
+    public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize) throws IOException {
+        this(queuePath, maxSegmentSize, maxQueueSize, -1);
+    }
     public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize, long maxRetentionMs) throws IOException {
         // ensure path exists, create it otherwise.
         Files.createDirectories(queuePath);
@@ -98,7 +102,8 @@ public final class DeadLetterQueueWriter implements Closeable {
         this.currentWriter = nextWriter();
         this.lastEntryTimestamp = Timestamp.now();
         this.scheduler = new ScheduledThreadPoolExecutor(1);
-        scheduler.scheduleAtFixedRate(this::purge, 30, 1, TimeUnit.MINUTES);
+        System.out.println("Max retention ms = " + maxRetentionMs);
+        scheduler.scheduleAtFixedRate(this::purge, 30, 30, TimeUnit.SECONDS);
         this.open = true;
     }
 
@@ -142,6 +147,7 @@ public final class DeadLetterQueueWriter implements Closeable {
 
     private void purge()  {
         try {
+            System.out.println("Cleaning");
             deleteWhile(cumulativeSegmentSizeIsGreaterThan(maxQueueSize).or(segmentContainsEntriesAfter(timestampFromRetention())));
         } catch (Exception e) {}
     }
@@ -164,10 +170,12 @@ public final class DeadLetterQueueWriter implements Closeable {
 
         byte[] record = entry.serialize();
         int eventPayloadSize = RECORD_HEADER_SIZE + record.length;
-        if (currentQueueSize.longValue() + eventPayloadSize > maxQueueSize) {
-            logger.error("cannot write event to DLQ: reached maxQueueSize of " + maxQueueSize);
-            return;
-        } else if (currentWriter.getPosition() + eventPayloadSize > maxSegmentSize) {
+//        if (currentQueueSize.longValue() + eventPayloadSize > maxQueueSize) {
+//            logger.error("cannot write event to DLQ: reached maxQueueSize of " + maxQueueSize);
+//            return;
+//        } else
+//
+        if (currentWriter.getPosition() + eventPayloadSize > maxSegmentSize) {
             currentWriter.close();
             currentWriter = nextWriter();
         }
@@ -281,6 +289,7 @@ public final class DeadLetterQueueWriter implements Closeable {
      */
     private Predicate<Path> segmentContainsEntriesAfter(Timestamp timestamp) {
         return p -> {
+            System.out.println("Want to delete entries older than " + timestamp.toIso8601());
             try (RecordIOReader reader = new RecordIOReader(p)){
                 return null == reader.seekToNextEventPosition(timestamp, entryTimeFromDLQEntry(), Timestamp::compareTo);
             } catch (IOException e) {
@@ -290,7 +299,11 @@ public final class DeadLetterQueueWriter implements Closeable {
     }
 
     private Predicate<Path> cumulativeSegmentSizeIsGreaterThan(long maxQueueSize){
-        return p -> currentQueueSize.longValue() > maxQueueSize;
+        return p -> {
+            System.out.println("Current queue size: " + currentQueueSize.longValue());
+            System.out.println("max queue size: " + maxQueueSize);
+            return currentQueueSize.longValue() > maxQueueSize;
+        };
     }
 
     private Predicate<Path> both(Timestamp x, long y){

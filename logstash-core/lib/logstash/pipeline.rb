@@ -26,7 +26,7 @@ require "logstash/compiler"
 require "logstash/execution_context"
 require "securerandom"
 
-java_import org.logstash.common.DeadLetterQueueFactory
+# java_import org.logstash.common.DeadLetterQueueFactory
 java_import org.logstash.common.SourceWithMetadata
 java_import org.logstash.common.io.DeadLetterQueueWriter
 
@@ -86,11 +86,12 @@ module LogStash; class BasePipeline
   end
 
   def dlq_writer
-    if settings.get_value("dead_letter_queue.enable")
-      @dlq_writer = DeadLetterQueueFactory.getWriter(pipeline_id, settings.get_value("path.dead_letter_queue"), settings.get_value("dead_letter_queue.max_bytes"))
-    else
-      @dlq_writer = LogStash::Util::DummyDeadLetterQueueWriter.new
-    end
+    # if settings.get_value("dead_letter_queue.enable")
+      # @dlq_writer = DeadLetterQueueFactory.getWriter(pipeline_id, settings.get_value("path.dead_letter_queue"))
+      LogStash::Util::DeadLetterQueueFactory.get(pipeline_id)
+    # else
+    #   @dlq_writer = LogStash::Util::DummyDeadLetterQueueWriter.new
+    # end
   end
 
   def compile_lir
