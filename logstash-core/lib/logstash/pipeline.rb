@@ -63,6 +63,7 @@ module LogStash; class BasePipeline
 
     @dlq_writer = dlq_writer
 
+
     grammar = LogStashConfigParser.new
     parsed_config = grammar.parse(config_str)
     raise(ConfigurationError, grammar.failure_reason) if parsed_config.nil?
@@ -86,13 +87,28 @@ module LogStash; class BasePipeline
   end
 
   def dlq_writer
-    # if settings.get_value("dead_letter_queue.enable")
-      # @dlq_writer = DeadLetterQueueFactory.getWriter(pipeline_id, settings.get_value("path.dead_letter_queue"))
-      LogStash::Util::DeadLetterQueueFactory.get(pipeline_id)
+    if settings.get_value("dead_letter_queue.enable")
+      settings_builder = DeadLetterQueueSettings::Builder.new
+      dlq_settings = settings_builder.base_path(settings.get("path.dead_letter_queue"))
+                         .pipeline_id(pipeline_id)
+                         .max_segment_size(settings.get('dead_letter_queue.segment_max_bytes'))
+                         .max_retained_time_period(settings.get('dead_letter_queue.age.threshold'), TimeUnit::NANOSECONDS)
+                         .max_retained_size(settings.get('dead_letter_queue.size.threshold'))
+                         .max_queue_size(settings.get('dead_letter_queue.max_bytes'))
+                         .build
+      dlq_writer = DeadLetterQueueFactory.get_writer(dlq_settings)
+      dlq_retainer = org.logstash.common.io.DeadLetterQueueRetentionManager.new(dlq_settings, dlq_writer)
+      dlq_retainer.start
+    #   @dlq_writer = DeadLetterQueueFactory.getWriter(pipeline_id, settings.get_value("path.dead_letter_queue"), settings.get_value("dead_letter_queue.max_bytes"))
     # else
     #   @dlq_writer = LogStash::Util::DummyDeadLetterQueueWriter.new
-    # end
+    end
   end
+
+  # def dlq_writer
+  #     LogStash::Util::DeadLetterQueueFactory.get(settings, pipeline_id)
+  #     org.logstash.common.io.DeadLetterQueueRetentionManager.new()
+  # end
 
   def compile_lir
     sources_with_metadata = [
@@ -340,7 +356,7 @@ module LogStash; class Pipeline < BasePipeline
   def close
     @filter_queue_client.close
     @queue.close
-    @dlq_writer.close
+    @dlq_writer.close if !!@dlq_writer
   end
 
   def transition_to_running

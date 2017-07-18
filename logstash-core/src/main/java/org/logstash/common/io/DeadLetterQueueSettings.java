@@ -1,10 +1,8 @@
 package org.logstash.common.io;
 
-import java.io.IOException;
+import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -15,9 +13,10 @@ public class DeadLetterQueueSettings {
     private final Path queuePath;
     private final long maxQueueSize;
     private final long maxRetainedSize;
-    private final long maxRetentionMs;
+    private final long maxRetainedMillis;
     private final long maxSegmentSize;
     private final String pipelineId;
+    private final long cleanInterval;
 
     public Path getQueuePath(){
         return this.queuePath;
@@ -29,32 +28,43 @@ public class DeadLetterQueueSettings {
 
     public long getMaxRetainedSize() { return this.maxRetainedSize; }
 
-    public long getMaxRetentionMs() {
-        return this.maxRetentionMs;
+    public long getMaxRetainedMillis() {
+        return this.maxRetainedMillis;
     }
 
     public long getMaxSegmentSize() {
         return this.maxSegmentSize;
     }
 
+    public String getPipelineId() { return this.pipelineId; }
+
+    public long getCleanInterval() { return this.cleanInterval; }
+
     private DeadLetterQueueSettings(Builder builder){
-        this.queuePath = Paths.get(builder.basePath, builder.pipelineId);
+        this.queuePath = builder.basePath.resolve(builder.pipelineId);
         this.maxQueueSize = builder.maxQueueSize;
         this.maxRetainedSize = builder.maxRetainedSize;
-        this.maxRetentionMs = builder.maxRetentionMilliseconds;
+        this.maxRetainedMillis = builder.maxRetainedMillis;
         this.maxSegmentSize = builder.maxSegmentSize;
         this.pipelineId = builder.pipelineId;
+        this.cleanInterval = builder.cleanIntervalMillis;
     }
 
     public static class Builder{
         private String pipelineId;
-        private String basePath;
-        private long maxSegmentSize;
-        private long maxRetainedSize;
+        private Path basePath;
+        private long maxSegmentSize = -1;
+        private long maxRetainedSize = -1;
         private long maxQueueSize = -1;
-        private long maxRetentionMilliseconds = -1;
+        private long maxRetainedMillis = -1;
+        private long cleanIntervalMillis = -1;
 
         public Builder basePath(String basePath){
+            this.basePath = Paths.get(basePath);
+            return this;
+        }
+
+        public Builder basePath(Path basePath){
             this.basePath = basePath;
             return this;
         }
@@ -74,18 +84,23 @@ public class DeadLetterQueueSettings {
             return this;
         }
 
-        public Builder maxRetentionMilliseconds(long maxRetentionMilliseconds){
-            this.maxRetentionMilliseconds = maxRetentionMilliseconds;
+        public Builder maxRetainedMilliseconds(long maxRetentionMilliseconds){
+            this.maxRetainedMillis = maxRetentionMilliseconds;
             return this;
         }
 
-        public Builder maxRetention(long time, TimeUnit unit){
-            this.maxRetentionMilliseconds = unit.toMillis(time);
+        public Builder maxRetainedTimePeriod(long time, TimeUnit unit){
+            this.maxRetainedMillis = unit.toMillis(time);
             return this;
         }
 
         public Builder maxSegmentSize(long maxSegmentSize) {
             this.maxSegmentSize = maxSegmentSize;
+            return this;
+        }
+
+        public Builder cleanIntervalSize(long duration, TimeUnit unit){
+            this.cleanIntervalMillis = unit.toMillis(duration);
             return this;
         }
 

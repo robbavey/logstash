@@ -24,7 +24,6 @@ import org.logstash.common.io.DeadLetterQueueSettings;
 import org.logstash.common.io.DeadLetterQueueWriter;
 
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -46,8 +45,8 @@ public class DeadLetterQueueFactory {
     }
 
 
-    public static DeadLetterQueueWriter getWriter(String id, DeadLetterQueueSettings settings){
-        return REGISTRY.computeIfAbsent(id, k -> {
+    public static DeadLetterQueueWriter getWriter(DeadLetterQueueSettings settings){
+        return REGISTRY.computeIfAbsent(settings.getPipelineId(), k -> {
             try{
                 return new DeadLetterQueueWriter(settings);
             } catch (IOException e) {
@@ -74,9 +73,9 @@ public class DeadLetterQueueFactory {
                 DeadLetterQueueSettings dlqSettings = new DeadLetterQueueSettings.Builder()
                                                                                  .basePath(dlqPath)
                                                                                  .pipelineId(k)
-                                                                                 .maxQueueSize(Long.MAX_VALUE)
+                                                                                 .maxQueueSize(maxQueueSize)
                                                                                  .maxSegmentSize(MAX_SEGMENT_SIZE_BYTES)
-                                                                                 .maxRetention(5, TimeUnit.DAYS)
+                                                                                 .maxRetainedTimePeriod(5, TimeUnit.DAYS)
                                                                                  .build();
 //                return new DeadLetterQueueWriter(Paths.get(dlqPath, k), MAX_SEGMENT_SIZE_BYTES, Long.MAX_VALUE);
                 return new DeadLetterQueueWriter(dlqSettings);

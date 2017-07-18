@@ -173,30 +173,27 @@ dead_letter_queue.enable: true
 #
 # path.dead_letter_queue:
 #
-# Maximum size per dlq segment
-dead_letter_queue.segment_max_bytes: 1kb
 
 # Dead Letter Queue Cleaner Settings:
 
-#   The Dead Letter Queue has a cleaner job that may be run and will clean up dead letter queue entries
-#   that are eligible for cleaning up. Entries mayh be eligible for cleanup if the entries are older than
-#   a set time, and/or the maximum size of the dead letter queue has been breached.
+# The Dead Letter Queue has a cleaner job that may be run and will clean up dead letter queue entries
+# that are eligible for cleaning up. Entries may be eligible for cleanup if the entries are older than
+# 'dead_letter_queue.age.threshold', and/or total size of the entries in a dead letter queue is greater
+# than 'dead_letter_queue.size.threshold'
 
 # Frequency that the dead letter queue cleaner runs
 # Default is 1 minute
-dead_letter_queue.clean_interval: 30s
+dead_letter_queue.clean_interval: 1m
 
 # Entries written to the dead letter queue that go over this interval are eligible to be cleaned up.
-# Default is 1024mb
-dead_letter_queue.size.threshold: 3kb
+# Default is no threshold
+# dead_letter_queue.size.threshold: 5kb
 
 # Maximum age of entries in the queue:
 #  Segment files solely containing entries older than the amount of time between current server time
 #  and the the value in this field are eligible to be cleaned up.
-# Default is none
-dead_letter_queue.age.threshold: 5m
-
-# Maximum age of dead-letter queue entries.
+# Default is no threshold
+# dead_letter_queue.age.threshold: 1d
 #
 #
 # ------------ Metrics Settings --------------

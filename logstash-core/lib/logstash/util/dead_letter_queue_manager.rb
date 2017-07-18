@@ -47,19 +47,24 @@ module LogStash; module Util
     java_import org.logstash.common.DeadLetterQueueFactory
     java_import org.logstash.common.io.DeadLetterQueueSettings
 
-    def self.get(pipeline_id)
-      if LogStash::SETTINGS.get("dead_letter_queue.enable")
+    def self.get(settings, pipeline_id)
+      if settings.get("dead_letter_queue.enable")
         settings_builder = DeadLetterQueueSettings::Builder.new
-        settings = settings_builder.base_path(LogStash::SETTINGS.get("path.dead_letter_queue"))
+        dlq_settings = settings_builder.base_path(settings.get("path.dead_letter_queue"))
                          .pipeline_id(pipeline_id)
-                         .max_segment_size(LogStash::SETTINGS.get('dead_letter_queue.segment_max_bytes'))
-                         .max_retention(LogStash::SETTINGS.get('dead_letter_queue.max_age'), TimeUnit::NANOSECONDS)
-                         .max_queue_size(LogStash::SETTINGS.get('dead_letter_queue.max_bytes'))
+                         .max_segment_size(settings.get('dead_letter_queue.segment_max_bytes'))
+                         .max_retained_time_period(settings.get('dead_letter_queue.age.threshold'), TimeUnit::NANOSECONDS)
+                         .max_retained_size(settings.get('dead_letter_queue.size.threshold'))
+                         .max_queue_size(settings.get('dead_letter_queue.max_bytes'))
                          .build
-        return DeadLetterQueueFactory.get_writer(pipeline_id, settings)
+        return DeadLetterQueueFactory.get_writer(dlq_settings)
       else
         return DummyDeadLetterQueueWriter.new
       end
+    end
+
+    def self.get_retention_manager(settings, writer)
+
     end
 
     def self.close(pipeline_id)

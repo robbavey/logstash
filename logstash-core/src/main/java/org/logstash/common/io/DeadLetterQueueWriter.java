@@ -18,7 +18,6 @@
  */
 package org.logstash.common.io;
 
-import java.io.Closeable;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.joda.time.DateTime;
@@ -27,6 +26,7 @@ import org.logstash.DLQEntry;
 import org.logstash.Event;
 import org.logstash.Timestamp;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
@@ -37,9 +37,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -54,11 +51,9 @@ public final class DeadLetterQueueWriter implements Closeable {
     private static final long MAX_SEGMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
     static final String SEGMENT_FILE_PATTERN = "%d.log";
-    private static final String LOCK_FILE = ".lock";
+    static final String LOCK_FILE = ".lock";
     private final long maxSegmentSize;
     private final long maxQueueSize;
-    private final long maxRetainedSize;
-    private final long maxRetentionMs;
     private LongAdder currentQueueSize;
     private final Path queuePath;
     private final FileLock lock;
@@ -66,14 +61,10 @@ public final class DeadLetterQueueWriter implements Closeable {
     private int currentSegmentIndex;
     private Timestamp lastEntryTimestamp;
     private boolean open;
-    private ScheduledExecutorService scheduler;
 
     private ConcurrentSkipListSet<Path> segments;
 
     public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize) throws IOException {
-        this(queuePath, maxSegmentSize, maxQueueSize, -1, -1);
-    }
-    public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize, long maxRetentionMs, long maxRetainedSize) throws IOException {
         // ensure path exists, create it otherwise.
         Files.createDirectories(queuePath);
         // check that only one instance of the writer is open in this configured path
@@ -91,8 +82,6 @@ public final class DeadLetterQueueWriter implements Closeable {
         this.queuePath = queuePath;
         this.maxSegmentSize = maxSegmentSize;
         this.maxQueueSize = maxQueueSize;
-        this.maxRetainedSize = maxRetainedSize;
-        this.maxRetentionMs = maxRetentionMs;
         this.currentQueueSize = new LongAdder();
         this.currentQueueSize.add(getStartupQueueSize());
         this.segments = new ConcurrentSkipListSet<>((p1, p2) -> {
@@ -103,8 +92,6 @@ public final class DeadLetterQueueWriter implements Closeable {
         currentSegmentIndex = (segments.size() > 0) ? segmentNameToIndex(segments.last()) : 0;
         this.currentWriter = nextWriter();
         this.lastEntryTimestamp = Timestamp.now();
-        this.scheduler = new ScheduledThreadPoolExecutor(1);
-        scheduler.scheduleAtFixedRate(this::purge, 30, 30, TimeUnit.SECONDS);
         this.open = true;
     }
 
@@ -115,11 +102,11 @@ public final class DeadLetterQueueWriter implements Closeable {
      * @throws IOException if the size of the file cannot be determined
      */
     public DeadLetterQueueWriter(String queuePath) throws IOException {
-        this(Paths.get(queuePath), MAX_SEGMENT_SIZE_BYTES, Long.MAX_VALUE, -1, -1);
+        this(Paths.get(queuePath), MAX_SEGMENT_SIZE_BYTES, Long.MAX_VALUE);
     }
 
     public DeadLetterQueueWriter(final DeadLetterQueueSettings settings) throws IOException {
-        this(settings.getQueuePath(), settings.getMaxSegmentSize(), settings.getMaxQueueSize(), settings.getMaxRetentionMs(), settings.getMaxRetainedSize());
+        this(settings.getQueuePath(), settings.getMaxSegmentSize(), settings.getMaxQueueSize());
     }
 
     private int segmentNameToIndex(Path path){
@@ -142,19 +129,8 @@ public final class DeadLetterQueueWriter implements Closeable {
         return Files.list(path).filter((p) -> p.toString().endsWith(".log"));
     }
 
-    synchronized void writeEntry(DLQEntry entry) throws IOException {
+    public synchronized void writeEntry(DLQEntry entry) throws IOException {
         innerWriteEntry(entry);
-    }
-
-    private void purge()  {
-        try {
-            System.out.println("Cleaning");
-            deleteWhile(cumulativeSegmentSizeIsGreaterThan(maxRetainedSize).or(segmentContainsEntriesAfter(timestampFromRetention())));
-        } catch (Exception e) {}
-    }
-
-    private Timestamp timestampFromRetention(){
-        return new Timestamp(DateTime.now().minusMillis((int)maxRetentionMs));
     }
 
     public synchronized void writeEntry(Event event, String pluginName, String pluginId, String reason) throws IOException {
@@ -168,7 +144,6 @@ public final class DeadLetterQueueWriter implements Closeable {
     }
 
     private void innerWriteEntry(DLQEntry entry) throws IOException {
-
         byte[] record = entry.serialize();
         int eventPayloadSize = RECORD_HEADER_SIZE + record.length;
         if (currentQueueSize.longValue() + eventPayloadSize > maxQueueSize) {
@@ -178,19 +153,20 @@ public final class DeadLetterQueueWriter implements Closeable {
             currentWriter.close();
             currentWriter = nextWriter();
         }
-
-        System.out.println("Writing time of entry " + entry.getEntryTime() + " to segment" + currentSegmentIndex);
         currentQueueSize.add(currentWriter.writeEvent(record));
     }
 
     @Override
     public synchronized void close() throws IOException {
-        if (currentWriter != null) {
-            currentWriter.close();
+        try {
+            if (currentWriter != null) {
+                currentWriter.close();
+            }
+        }finally {
+            Files.deleteIfExists(queuePath.resolve(LOCK_FILE));
+            open = false;
+            this.lock.release();
         }
-        Files.deleteIfExists(queuePath.resolve(LOCK_FILE));
-        open = false;
-        this.lock.release();
     }
 
     public boolean isOpen() {
@@ -206,38 +182,14 @@ public final class DeadLetterQueueWriter implements Closeable {
     }
 
     /**
-     * Deletes segments that only contain entries older than the timestamp given.
-     * @param timestamp Delete segments that contain data older than this.
-     * @return number of segments deleted.
-     * @throws Exception if the operation fails.
-     */
-    int deleteSegmentsOlderThan(Timestamp timestamp) throws Exception {
-        return deleteWhile(segmentContainsEntriesAfter(timestamp));
-    }
-
-    int deleteSegmentsOlderThan(int timeInHours) throws Exception {
-        return deleteSegmentsOlderThan(new Timestamp(DateTime.now().minusHours(timeInHours)));
-    }
-
-    /**
-     * Deletes segments over the size of that given.
-     * @param size Total size of segments that should not be exceeded.
-     * @return number of segments deleted.
-     * @throws Exception if the operation fails.
-     */
-    int deleteSegmentsUntilSmallerThan(final long size) throws Exception {
-        return deleteWhile(cumulativeSegmentSizeIsGreaterThan(size));
-    }
-
-    /**
      * Function to delete segments from the oldest while
      *  1) The predicate holds
      *  2) We have not reached the 'final' segment - ie that being written
-     * @param predicate -
-     * @return
+     * @param predicate - Predicate function. Implementing predicates /
+     * @return Number of segments deleted
      * @throws Exception
      */
-    private int deleteWhile(final Predicate<Path> predicate) throws Exception {
+     int deleteWhile(final Predicate<Path> predicate) throws Exception {
         int count = 0;
         for (Path segment: segments){
             // Don't delete the final segment.
@@ -257,8 +209,11 @@ public final class DeadLetterQueueWriter implements Closeable {
 
     private boolean deleteSegment(final Path segment){
         File segmentFile = segment.toFile();
+        if (!segmentFile.exists()){
+            segments.remove(segment);
+        }
         long size = segmentFile.length();
-        if (segmentFile.delete()){
+        if (segments.size() > 1 && segmentFile.delete()){
             segments.remove(segment);
             currentQueueSize.add(0 - size);
             return true;
@@ -266,59 +221,15 @@ public final class DeadLetterQueueWriter implements Closeable {
         return false;
     }
 
-    /**
-     * Helper function to extract entry time from a serialized DLQ Entry
-     * Returns null in the case of failed deserialization
-     * @return The timestamp if the DLQ Entry is valid and has a timestamp, null otherwise
-     */
-    private static Function<byte[], Timestamp> entryTimeFromDLQEntry() {
-        return (b) ->
-        {
-            try {
-                return DLQEntry.deserialize(b).getEntryTime();
-            } catch (IOException e) {
-                return null;
-            }
-        };
-    }
-
-    /**
-     * Predicate to determine if a segment includes the given timestamp.
-     * @param timestamp Timestamp of the date
-     * @return True if segment contains entries after the timestamp given.
-     */
-    private Predicate<Path> segmentContainsEntriesAfter(final Timestamp timestamp) {
-        return p -> {
-            System.out.println("Want to delete entries older than " + timestamp.toIso8601());
-            try (RecordIOReader reader = new RecordIOReader(p)){
-                return null == reader.seekToNextEventPosition(timestamp, entryTimeFromDLQEntry(), Timestamp::compareTo);
-            } catch (IOException e) {
-                return true;
-            }
-        };
-    }
-
-    private Predicate<Path> cumulativeSegmentSizeIsGreaterThan(final long maxRetainedSize){
-        return p -> {
-            System.out.println("Current queue size: " + currentQueueSize.longValue());
-            System.out.println("max queue size: " + maxRetainedSize);
-            return currentQueueSize.longValue() > maxRetainedSize;
-        };
-    }
-
-    private Predicate<Path> both(final Timestamp x, final long y){
-        return cumulativeSegmentSizeIsGreaterThan(y).or(segmentContainsEntriesAfter(x));
-    }
-
-    private synchronized Path nextSegment() {
+    private Path nextSegment() {
         Path segmentName = queuePath.resolve(String.format(SEGMENT_FILE_PATTERN, ++currentSegmentIndex));
         segments.add(segmentName);
-        currentQueueSize.increment();
         return segmentName;
     }
 
     private RecordIOWriter nextWriter() throws IOException {
-        return new RecordIOWriter(nextSegment());
+        RecordIOWriter writer = new RecordIOWriter(nextSegment());
+        currentQueueSize.add(RecordIOWriter.VERSION_SIZE);
+        return writer;
     }
-
 }

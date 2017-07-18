@@ -76,15 +76,12 @@ public class RecordIOReader implements Closeable {
     public <T> byte[] seekToNextEventPosition(T target, Function<byte[], T> keyExtractor, Comparator<T> keyComparator) throws IOException {
         int matchingBlock = UNSET;
         int lowBlock = 0;
-        int highBlock = finalBlockPosition();
+        int highBlock = (int) (channel.size() - VERSION_SIZE) / BLOCK_SIZE;
 
-        int middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
         while (lowBlock < highBlock) {
-            middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
+            int middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
             seekToBlock(middle);
             T found = keyExtractor.apply(readEvent());
-            System.out.println("Found is " + found + " Target is " + target);
-
             int compare = keyComparator.compare(found, target);
             if (compare > 0) {
                 highBlock = middle - 1;

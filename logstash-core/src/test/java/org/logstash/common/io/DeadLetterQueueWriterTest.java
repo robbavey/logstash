@@ -26,17 +26,17 @@ import org.junit.rules.TemporaryFolder;
 import org.logstash.DLQEntry;
 import org.logstash.Event;
 
-import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.Collections;
+import java.util.Random;
 
 import static junit.framework.TestCase.assertFalse;
-import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.logstash.common.io.RecordIOWriter.RECORD_HEADER_SIZE;
@@ -106,10 +106,9 @@ public class DeadLetterQueueWriterTest {
         int payloadLength = RECORD_HEADER_SIZE + VERSION_SIZE + entry.serialize().length;
         final int MESSAGE_COUNT= 5;
         long queueLength = payloadLength * MESSAGE_COUNT;
-        DeadLetterQueueWriter writer = null;
 
-        try{
-            writer = new DeadLetterQueueWriter(dir, payloadLength, queueLength);
+
+        try (DeadLetterQueueWriter writer = new DeadLetterQueueWriter(dir, payloadLength, queueLength)){
             for (int i = 0; i < MESSAGE_COUNT; i++)
                 writer.writeEntry(entry);
 
@@ -126,11 +125,74 @@ public class DeadLetterQueueWriterTest {
                     .mapToLong(p -> p.toFile().length())
                     .sum();
             assertThat(size, is(queueLength));
-        } finally {
-            if (writer != null) {
-                writer.close();
-            }
+        }
+    }
+
+    @Test
+    public void testDeleteWhileAlwaysTrueDoesNotDeleteCurrent() throws Exception {
+        DLQEntry entry = new DLQEntry(new Event(), "type", "id", String.format("%03d", 1));
+
+        int payloadLength = RECORD_HEADER_SIZE + VERSION_SIZE + entry.serialize().length;
+        final int MESSAGE_COUNT= 5;
+        long queueLength = payloadLength * MESSAGE_COUNT;
+
+        try (DeadLetterQueueWriter writer = new DeadLetterQueueWriter(dir, payloadLength, queueLength)) {
+            for (int i = 1; i <= MESSAGE_COUNT; i++)
+                writer.writeEntry(new DLQEntry(new Event(), "type", "id", String.format("%03d", i)));
+
+            writer.deleteWhile(t -> true);
         }
 
+        try(DeadLetterQueueReader reader = new DeadLetterQueueReader(dir)) {
+            DLQEntry dlqEntry = reader.pollEntry(1000);
+            assertThat(dlqEntry.getReason(), is(equalTo(String.format("%03d", MESSAGE_COUNT))));
+        }
     }
+
+    @Test
+    public void testDeleteWhileAlwaysFalseDoesNotDelete() throws Exception {
+        DLQEntry entry = new DLQEntry(new Event(), "type", "id", String.format("%03d", 1));
+
+        int payloadLength = RECORD_HEADER_SIZE + VERSION_SIZE + entry.serialize().length;
+        final int MESSAGE_COUNT= 5;
+        long queueLength = payloadLength * MESSAGE_COUNT;
+
+
+        try (DeadLetterQueueWriter writer = new DeadLetterQueueWriter(dir, payloadLength, queueLength)) {
+            for (int i = 1; i <= MESSAGE_COUNT; i++)
+                writer.writeEntry(new DLQEntry(new Event(), "type", "id", String.format("%03d", i)));
+
+            writer.deleteWhile(t -> false);
+        }
+
+        try(DeadLetterQueueReader reader = new DeadLetterQueueReader(dir)) {
+            DLQEntry dlqEntry = reader.pollEntry(1000);
+            assertThat(dlqEntry.getReason(), is(equalTo(String.format("%03d", 1))));
+        }
+    }
+
+    @Test
+    public void testDeleteWhileDeletesTheCorrectAmount() throws Exception {
+        DLQEntry entry = new DLQEntry(new Event(), "type", "id", String.format("%03d", 1));
+
+        int payloadLength = RECORD_HEADER_SIZE + VERSION_SIZE + entry.serialize().length;
+        final int MESSAGE_COUNT= 5;
+        long queueLength = payloadLength * MESSAGE_COUNT;
+        int messageToDelete = new Random().nextInt(MESSAGE_COUNT - 1) + 1;
+
+        System.out.println(messageToDelete);
+
+        try (DeadLetterQueueWriter writer = new DeadLetterQueueWriter(dir, payloadLength, queueLength)) {
+            for (int i = 1; i <= MESSAGE_COUNT; i++)
+                writer.writeEntry(new DLQEntry(new Event(), "type", "id", String.format("%03d", i)));
+
+            writer.deleteWhile(p -> Integer.parseInt(p.getFileName().toString().split("\\.")[0]) < messageToDelete);
+        }
+
+        try(DeadLetterQueueReader reader = new DeadLetterQueueReader(dir)) {
+            DLQEntry dlqEntry = reader.pollEntry(1000);
+            assertThat(dlqEntry.getReason(), is(equalTo(String.format("%03d", messageToDelete))));
+        }
+    }
+
 }

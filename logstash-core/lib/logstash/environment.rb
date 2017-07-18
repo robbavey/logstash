@@ -58,7 +58,7 @@ module LogStash
             Setting::TimeValue.new("dead_letter_queue.age.threshold", "-1"),
             Setting::Bytes.new("dead_letter_queue.segment_max_bytes", "10mb"),
             Setting::TimeValue.new("dead_letter_queue.clean_interval", "5m"),
-            Setting::Bytes.new("dead_letter_queue.max_bytes", "1024mb"),
+            Setting::Bytes.new("dead_letter_queue.max_bytes", "2048mb"),
             Setting::TimeValue.new("slowlog.threshold.warn", "-1"),
             Setting::TimeValue.new("slowlog.threshold.info", "-1"),
             Setting::TimeValue.new("slowlog.threshold.debug", "-1"),

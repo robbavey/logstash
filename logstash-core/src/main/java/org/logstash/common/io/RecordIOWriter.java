@@ -18,6 +18,9 @@
  */
 package org.logstash.common.io;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -66,7 +69,8 @@ import static org.logstash.common.io.RecordType.START;
  */
 public final class RecordIOWriter implements Closeable {
 
-    private final FileChannel channel;
+    private static final Logger logger = LogManager.getLogger(RecordIOWriter.class);
+    private FileChannel channel;
     private int posInBlock;
     private int currentBlockIdx;
     private Path path;
@@ -79,9 +83,11 @@ public final class RecordIOWriter implements Closeable {
     public RecordIOWriter(Path recordsFile) throws IOException {
         this.posInBlock = 0;
         this.currentBlockIdx = 0;
-        recordsFile.toFile().createNewFile();
         this.path = recordsFile;
-        this.channel = FileChannel.open(recordsFile, StandardOpenOption.WRITE);
+        if (!this.path.toFile().createNewFile()){
+            logger.warn("File " + path.toString() + " already exists.");
+        }
+        this.channel = FileChannel.open(this.path, StandardOpenOption.WRITE);
         this.channel.write(ByteBuffer.wrap(new byte[] { VERSION }));
     }
 
@@ -132,6 +138,7 @@ public final class RecordIOWriter implements Closeable {
 
             Checksum checksum = new CRC32();
             checksum.update(slice.array(), slice.arrayOffset() + slice.position(), nextRecordSize);
+
             posInBlock += writeRecordHeader(
                     new RecordHeader(nextType, nextRecordSize, optTotalSize, (int) checksum.getValue()));
             posInBlock += channel.write(slice);
