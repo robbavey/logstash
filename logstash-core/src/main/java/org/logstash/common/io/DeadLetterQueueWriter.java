@@ -57,6 +57,7 @@ public final class DeadLetterQueueWriter implements Closeable {
     private static final String LOCK_FILE = ".lock";
     private final long maxSegmentSize;
     private final long maxQueueSize;
+    private final long maxRetainedSize;
     private final long maxRetentionMs;
     private LongAdder currentQueueSize;
     private final Path queuePath;
@@ -70,9 +71,9 @@ public final class DeadLetterQueueWriter implements Closeable {
     private ConcurrentSkipListSet<Path> segments;
 
     public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize) throws IOException {
-        this(queuePath, maxSegmentSize, maxQueueSize, -1);
+        this(queuePath, maxSegmentSize, maxQueueSize, -1, -1);
     }
-    public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize, long maxRetentionMs) throws IOException {
+    public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize, long maxRetentionMs, long maxRetainedSize) throws IOException {
         // ensure path exists, create it otherwise.
         Files.createDirectories(queuePath);
         // check that only one instance of the writer is open in this configured path
@@ -90,6 +91,7 @@ public final class DeadLetterQueueWriter implements Closeable {
         this.queuePath = queuePath;
         this.maxSegmentSize = maxSegmentSize;
         this.maxQueueSize = maxQueueSize;
+        this.maxRetainedSize = maxRetainedSize;
         this.maxRetentionMs = maxRetentionMs;
         this.currentQueueSize = new LongAdder();
         this.currentQueueSize.add(getStartupQueueSize());
@@ -102,7 +104,6 @@ public final class DeadLetterQueueWriter implements Closeable {
         this.currentWriter = nextWriter();
         this.lastEntryTimestamp = Timestamp.now();
         this.scheduler = new ScheduledThreadPoolExecutor(1);
-        System.out.println("Max retention ms = " + maxRetentionMs);
         scheduler.scheduleAtFixedRate(this::purge, 30, 30, TimeUnit.SECONDS);
         this.open = true;
     }
@@ -114,11 +115,11 @@ public final class DeadLetterQueueWriter implements Closeable {
      * @throws IOException if the size of the file cannot be determined
      */
     public DeadLetterQueueWriter(String queuePath) throws IOException {
-        this(Paths.get(queuePath), MAX_SEGMENT_SIZE_BYTES, Long.MAX_VALUE, -1);
+        this(Paths.get(queuePath), MAX_SEGMENT_SIZE_BYTES, Long.MAX_VALUE, -1, -1);
     }
 
     public DeadLetterQueueWriter(final DeadLetterQueueSettings settings) throws IOException {
-        this(settings.getQueuePath(), settings.getMaxSegmentSize(), settings.getMaxQueueSize(), settings.getMaxRetentionMs());
+        this(settings.getQueuePath(), settings.getMaxSegmentSize(), settings.getMaxQueueSize(), settings.getMaxRetentionMs(), settings.getMaxRetainedSize());
     }
 
     private int segmentNameToIndex(Path path){
@@ -148,7 +149,7 @@ public final class DeadLetterQueueWriter implements Closeable {
     private void purge()  {
         try {
             System.out.println("Cleaning");
-            deleteWhile(cumulativeSegmentSizeIsGreaterThan(maxQueueSize).or(segmentContainsEntriesAfter(timestampFromRetention())));
+            deleteWhile(cumulativeSegmentSizeIsGreaterThan(maxRetainedSize).or(segmentContainsEntriesAfter(timestampFromRetention())));
         } catch (Exception e) {}
     }
 
@@ -170,15 +171,14 @@ public final class DeadLetterQueueWriter implements Closeable {
 
         byte[] record = entry.serialize();
         int eventPayloadSize = RECORD_HEADER_SIZE + record.length;
-//        if (currentQueueSize.longValue() + eventPayloadSize > maxQueueSize) {
-//            logger.error("cannot write event to DLQ: reached maxQueueSize of " + maxQueueSize);
-//            return;
-//        } else
-//
-        if (currentWriter.getPosition() + eventPayloadSize > maxSegmentSize) {
+        if (currentQueueSize.longValue() + eventPayloadSize > maxQueueSize) {
+            logger.error("cannot write event to DLQ: reached maxQueueSize of " + maxQueueSize);
+            return;
+        } else if (currentWriter.getPosition() + eventPayloadSize > maxSegmentSize) {
             currentWriter.close();
             currentWriter = nextWriter();
         }
+
         System.out.println("Writing time of entry " + entry.getEntryTime() + " to segment" + currentSegmentIndex);
         currentQueueSize.add(currentWriter.writeEvent(record));
     }
@@ -225,7 +225,7 @@ public final class DeadLetterQueueWriter implements Closeable {
      * @return number of segments deleted.
      * @throws Exception if the operation fails.
      */
-    int deleteSegmentsUntilSmallerThan(long size) throws Exception {
+    int deleteSegmentsUntilSmallerThan(final long size) throws Exception {
         return deleteWhile(cumulativeSegmentSizeIsGreaterThan(size));
     }
 
@@ -237,7 +237,7 @@ public final class DeadLetterQueueWriter implements Closeable {
      * @return
      * @throws Exception
      */
-    private int deleteWhile(Predicate<Path> predicate) throws Exception {
+    private int deleteWhile(final Predicate<Path> predicate) throws Exception {
         int count = 0;
         for (Path segment: segments){
             // Don't delete the final segment.
@@ -287,7 +287,7 @@ public final class DeadLetterQueueWriter implements Closeable {
      * @param timestamp Timestamp of the date
      * @return True if segment contains entries after the timestamp given.
      */
-    private Predicate<Path> segmentContainsEntriesAfter(Timestamp timestamp) {
+    private Predicate<Path> segmentContainsEntriesAfter(final Timestamp timestamp) {
         return p -> {
             System.out.println("Want to delete entries older than " + timestamp.toIso8601());
             try (RecordIOReader reader = new RecordIOReader(p)){
@@ -298,15 +298,15 @@ public final class DeadLetterQueueWriter implements Closeable {
         };
     }
 
-    private Predicate<Path> cumulativeSegmentSizeIsGreaterThan(long maxQueueSize){
+    private Predicate<Path> cumulativeSegmentSizeIsGreaterThan(final long maxRetainedSize){
         return p -> {
             System.out.println("Current queue size: " + currentQueueSize.longValue());
-            System.out.println("max queue size: " + maxQueueSize);
-            return currentQueueSize.longValue() > maxQueueSize;
+            System.out.println("max queue size: " + maxRetainedSize);
+            return currentQueueSize.longValue() > maxRetainedSize;
         };
     }
 
-    private Predicate<Path> both(Timestamp x, long y){
+    private Predicate<Path> both(final Timestamp x, final long y){
         return cumulativeSegmentSizeIsGreaterThan(y).or(segmentContainsEntriesAfter(x));
     }
 

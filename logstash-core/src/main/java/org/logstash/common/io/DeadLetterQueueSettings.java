@@ -14,6 +14,7 @@ public class DeadLetterQueueSettings {
 
     private final Path queuePath;
     private final long maxQueueSize;
+    private final long maxRetainedSize;
     private final long maxRetentionMs;
     private final long maxSegmentSize;
     private final String pipelineId;
@@ -26,6 +27,8 @@ public class DeadLetterQueueSettings {
         return this.maxQueueSize;
     }
 
+    public long getMaxRetainedSize() { return this.maxRetainedSize; }
+
     public long getMaxRetentionMs() {
         return this.maxRetentionMs;
     }
@@ -37,6 +40,7 @@ public class DeadLetterQueueSettings {
     private DeadLetterQueueSettings(Builder builder){
         this.queuePath = Paths.get(builder.basePath, builder.pipelineId);
         this.maxQueueSize = builder.maxQueueSize;
+        this.maxRetainedSize = builder.maxRetainedSize;
         this.maxRetentionMs = builder.maxRetentionMilliseconds;
         this.maxSegmentSize = builder.maxSegmentSize;
         this.pipelineId = builder.pipelineId;
@@ -46,6 +50,7 @@ public class DeadLetterQueueSettings {
         private String pipelineId;
         private String basePath;
         private long maxSegmentSize;
+        private long maxRetainedSize;
         private long maxQueueSize = -1;
         private long maxRetentionMilliseconds = -1;
 
@@ -61,6 +66,11 @@ public class DeadLetterQueueSettings {
 
         public Builder maxQueueSize(long maxQueueSize){
             this.maxQueueSize = maxQueueSize;
+            return this;
+        }
+
+        public Builder maxRetainedSize(long maxRetainedSize){
+            this.maxRetainedSize = maxRetainedSize;
             return this;
         }
 

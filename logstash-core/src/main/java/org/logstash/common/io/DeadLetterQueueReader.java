@@ -32,8 +32,6 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
-import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -50,13 +48,11 @@ public final class DeadLetterQueueReader implements Closeable {
     private final Path queuePath;
     private final ConcurrentSkipListSet<Path> segments;
     private final WatchService watchService;
-    private DirectoryWatcher directoryWatcher;
 
     public DeadLetterQueueReader(Path queuePath) throws IOException {
         this.queuePath = queuePath;
         this.watchService = FileSystems.getDefault().newWatchService();
         this.queuePath.register(watchService, ENTRY_CREATE, ENTRY_DELETE);
-//        directoryWatcher = new DirectoryWatcher(queuePath);
         this.segments = new ConcurrentSkipListSet<>((p1, p2) -> {
             Function<Path, Integer> id = (p) -> Integer.parseInt(p.getFileName().toString().split("\\.")[0]);
             return id.apply(p1).compareTo(id.apply(p2));
@@ -102,36 +98,6 @@ public final class DeadLetterQueueReader implements Closeable {
         return System.currentTimeMillis() - startTime;
     }
 
-//    private long pollNewSegments(long timeout) throws IOException, InterruptedException {
-//        long startTime = System.currentTimeMillis();
-//        WatchKey key = watchService.poll(timeout, TimeUnit.MILLISECONDS);
-//
-////        if (key != null) {
-////            for (WatchEvent<?> watchEvent : key.pollEvents()) {
-////                if (watchEvent.kind() == StandardWatchEventKinds.ENTRY_CREATE) {
-////                    segments.addAll(getSegmentPaths(queuePath).collect(Collectors.toList()));
-////                }
-////                key.reset();
-////            }
-////        }
-//
-//        boolean changeMade = false;
-//        if (key != null) {
-//            for (WatchEvent<?> watchEvent : key.pollEvents()) {
-//                changeMade = true;
-//                key.reset();
-//            }
-//        }
-//        if (changeMade){
-//            Set<Path> newPaths = getSegmentPaths(queuePath).collect(Collectors.toSet());
-//            segments.retainAll(newPaths);
-//            segments.addAll(newPaths);
-////            segments.addAll(getSegmentPaths(queuePath).collect(Collectors.toList()));
-//        }
-//
-//        return System.currentTimeMillis() - startTime;
-//    }
-
     public DLQEntry pollEntry(long timeout) throws IOException, InterruptedException {
         byte[] bytes = pollEntryBytes(timeout);
         if (bytes == null) {
@@ -148,7 +114,6 @@ public final class DeadLetterQueueReader implements Closeable {
         long timeoutRemaining = timeout;
         if (currentReader == null) {
             timeoutRemaining -= pollNewSegments(timeout);
-//            directoryWatcher.checkForModifications(timeout, segments);
             // If no new segments are found, exit
             if (segments.isEmpty()) {
                 logger.debug("No entries found: no segment files found in dead-letter-queue directory");
@@ -160,7 +125,6 @@ public final class DeadLetterQueueReader implements Closeable {
         byte[] event = currentReader.readEvent();
         if (event == null && currentReader.isEndOfStream()) {
             if (currentReader.getPath().equals(segments.last())) {
-//                directoryWatcher.checkForModifications(timeoutRemaining, segments);
                 pollNewSegments(timeoutRemaining);
             } else {
                 currentReader.close();
