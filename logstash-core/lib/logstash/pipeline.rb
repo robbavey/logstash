@@ -199,7 +199,7 @@ module LogStash; class Pipeline < BasePipeline
     begin
       @queue = LogStash::QueueFactory.create(settings)
     rescue => e
-      @logger.error("Logstash failed to create queue", default_logging_keys("exception" => e.message, "backtrace" => e.backtrace))
+      @logger.error("Logstash failed to create queue", default_logging_keys("message" => e.message, "backtrace" => e.backtrace))
       raise e
     end
 
