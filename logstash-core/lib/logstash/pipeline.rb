@@ -88,15 +88,16 @@ module LogStash; class BasePipeline
 
   def dlq_writer
     if settings.get_value("dead_letter_queue.enable")
-      settings_builder = DeadLetterQueueSettings::Builder.new
+      settings_builder = org.logstash.common.io.DeadLetterQueueSettings::Builder.new
       dlq_settings = settings_builder.base_path(settings.get("path.dead_letter_queue"))
                          .pipeline_id(pipeline_id)
+                         .clean_interval(settings.get('dead_letter_queue.clean_interval'))
                          .max_segment_size(settings.get('dead_letter_queue.segment_max_bytes'))
-                         .max_retained_time_period(settings.get('dead_letter_queue.age.threshold'), TimeUnit::NANOSECONDS)
+                         .max_retained_time_period(settings.get('dead_letter_queue.age.threshold'), java.util.concurrent.TimeUnit::NANOSECONDS)
                          .max_retained_size(settings.get('dead_letter_queue.size.threshold'))
                          .max_queue_size(settings.get('dead_letter_queue.max_bytes'))
                          .build
-      dlq_writer = DeadLetterQueueFactory.get_writer(dlq_settings)
+      dlq_writer =org.logstash.common.DeadLetterQueueFactory.get_writer(dlq_settings)
       dlq_retainer = org.logstash.common.io.DeadLetterQueueRetentionManager.new(dlq_settings, dlq_writer)
       dlq_retainer.start
     #   @dlq_writer = DeadLetterQueueFactory.getWriter(pipeline_id, settings.get_value("path.dead_letter_queue"), settings.get_value("dead_letter_queue.max_bytes"))

@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-public class DeadLetterQueueRetentionManager {
+public class DeadLetterQueueRetentionManager  {
     private static final Logger logger = LogManager.getLogger(DeadLetterQueueWriter.class);
     private final long maxRetainedSize;
     private final long maxRetainedMillis;
@@ -25,7 +25,7 @@ public class DeadLetterQueueRetentionManager {
     private final ScheduledExecutorService scheduler;
     private final DeadLetterQueueWriter writer;
 
-    DeadLetterQueueRetentionManager(final DeadLetterQueueSettings settings, final DeadLetterQueueWriter writer) throws IOException{
+    public DeadLetterQueueRetentionManager(final DeadLetterQueueSettings settings, final DeadLetterQueueWriter writer) throws IOException{
         this.maxRetainedSize = settings.getMaxRetainedSize();
         this.maxRetainedMillis = settings.getMaxRetainedMillis();
         this.cleanIntervalMillis = settings.getCleanInterval();
@@ -33,11 +33,11 @@ public class DeadLetterQueueRetentionManager {
         this.scheduler = new ScheduledThreadPoolExecutor(1);
     }
 
-    public void start(){
+    public void start() {
         scheduler.scheduleAtFixedRate(this::purge, 0, cleanIntervalMillis, TimeUnit.MILLISECONDS);
     }
 
-    void purge()  {
+    public void purge()  {
         try {
             if (maxRetainedSize == -1){
                 if (maxRetainedMillis > 0){

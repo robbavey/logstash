@@ -99,7 +99,7 @@ public class DeadLetterQueueSettings {
             return this;
         }
 
-        public Builder cleanIntervalSize(long duration, TimeUnit unit){
+        public Builder cleanInterval(long duration, TimeUnit unit){
             this.cleanIntervalMillis = unit.toMillis(duration);
             return this;
         }
