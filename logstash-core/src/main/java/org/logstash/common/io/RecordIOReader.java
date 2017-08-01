@@ -18,6 +18,9 @@
  */
 package org.logstash.common.io;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -39,6 +42,7 @@ import static org.logstash.common.io.RecordIOWriter.VERSION_SIZE;
  */
 public final class RecordIOReader implements Closeable {
 
+    private final static Logger logger = LogManager.getLogger(RecordIOReader.class);
     private final FileChannel channel;
     private final ByteBuffer currentBlock;
     private int currentBlockSizeReadFromChannel;
@@ -145,6 +149,10 @@ public final class RecordIOReader implements Closeable {
      *
      */
      int seekToStartOfEventInBlock() {
+         // Already consumed all the bytes in this block.
+        if (currentBlock.position() == currentBlockSizeReadFromChannel){
+             return -1;
+         }
          while (true) {
              RecordType type = RecordType.fromByte(currentBlock.array()[currentBlock.arrayOffset() + currentBlock.position()]);
              if (RecordType.COMPLETE.equals(type) || RecordType.START.equals(type)) {
@@ -156,7 +164,7 @@ public final class RecordIOReader implements Closeable {
                  return -1;
              }
          }
-    }
+     }
 
     /**
      *

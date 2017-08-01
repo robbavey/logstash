@@ -63,4 +63,11 @@ public class RecordHeader {
         final int checksum = currentBlock.getInt();
         return new RecordHeader(type, size, totalEventSize, checksum);
     }
+
+    public String toString(){
+        return "type: " + type +
+                ",  size: " + size +
+                "total Event Size: " + totalEventSize +
+                "checksum: " + checksum;
+    }
 }

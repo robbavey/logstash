@@ -52,5 +52,6 @@ public enum RecordType {
             default:
                 return null;
         }
+
     }
 }

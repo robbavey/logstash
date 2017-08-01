@@ -20,7 +20,6 @@ public class StringElement implements Queueable {
     public static StringElement deserialize(byte[] bytes) {
         ByteBuffer buffer = ByteBuffer.allocate(bytes.length);
         buffer.put(bytes);
-
         buffer.position(0);
         byte[] content = new byte[bytes.length];
         buffer.get(content);
