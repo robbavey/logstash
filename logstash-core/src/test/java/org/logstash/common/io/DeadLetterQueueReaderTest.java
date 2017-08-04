@@ -123,9 +123,7 @@ public class DeadLetterQueueReaderTest {
 
         // Fill event with not quite enough characters to fill block. Fill event with valid RecordType characters - this
         // was the cause of https://github.com/elastic/logstash/issues/7868
-        char[] field = new char[32500];
-        Arrays.fill(field, 's');
-        event.setField("message", new String(field));
+        event.setField("message", generateMessageContent(32500));
         long startTime = System.currentTimeMillis();
         int messageSize = 0;
         DeadLetterQueueWriter writeManager = null;
@@ -240,9 +238,7 @@ public class DeadLetterQueueReaderTest {
     public void testBlockAndSegmentBoundary() throws Exception {
         final int PAD_FOR_BLOCK_SIZE_EVENT = 32616;
         Event event = new Event();
-        char[] field = new char[PAD_FOR_BLOCK_SIZE_EVENT];
-        Arrays.fill(field, 'e');
-        event.setField("T", new String(field));
+        event.setField("T", generateMessageContent(PAD_FOR_BLOCK_SIZE_EVENT));
         Timestamp timestamp = new Timestamp();
 
         DeadLetterQueueWriter writeManager = null;
@@ -280,9 +276,7 @@ public class DeadLetterQueueReaderTest {
         try {
             writeManager = new DeadLetterQueueWriter(dir, 10 * 1024 * 1024, 1_000_000_000L);
             for (int i = 0; i < eventCount; i++) {
-                char[] field = new char[(int)(Math.random() * (maxEventSize))];
-                Arrays.fill(field, randomFillItem());
-                event.setField("message", new String(field));
+                event.setField("message", generateMessageContent((int)(Math.random() * (maxEventSize))));
                 DLQEntry entry = new DLQEntry(event, "", "", String.valueOf(i), new Timestamp(startTime++));
                 writeManager.writeEntry(entry);
             }
@@ -300,19 +294,6 @@ public class DeadLetterQueueReaderTest {
         } finally {
             if (readManager != null) readManager.close();
         }
-    }
-
-    // Select a random char to fill the list with.
-    // Randomly selects a valid value for RecordType, or a non-valid value.
-    private char randomFillItem() {
-        char[] valid = new char[RecordType.values().length + 1];
-        int j = 0;
-        valid[j] = 'x';
-        for (RecordType type : RecordType.values()){
-            valid[j++] = (char)type.toByte();
-        }
-        Random random = new Random();
-        return valid[random.nextInt(valid.length)];
     }
 
     @Test
@@ -345,6 +326,21 @@ public class DeadLetterQueueReaderTest {
 
         seekReadAndVerify(new Timestamp(startTime + FIRST_WRITE_EVENT_COUNT),
                           String.valueOf(FIRST_WRITE_EVENT_COUNT));
+    }
+
+    private String generateMessageContent(int size) {
+        char[] valid = new char[RecordType.values().length + 1];
+        int j = 0;
+        valid[j] = 'x';
+        for (RecordType type : RecordType.values()){
+            valid[j++] = (char)type.toByte();
+        }
+        Random random = new Random();
+        char fillWith = valid[random.nextInt(valid.length)];
+
+        char[] fillArray = new char[size];
+        Arrays.fill(fillArray, fillWith);
+        return new String(fillArray);
     }
 
     private void seekReadAndVerify(final Timestamp seekTarget, final String expectedValue) throws Exception {
