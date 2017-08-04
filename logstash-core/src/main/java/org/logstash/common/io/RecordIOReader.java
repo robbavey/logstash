@@ -40,7 +40,7 @@ import static org.logstash.common.io.RecordIOWriter.VERSION_SIZE;
 public final class RecordIOReader implements Closeable {
 
     private final FileChannel channel;
-    private final ByteBuffer currentBlock;
+    private ByteBuffer currentBlock;
     private int currentBlockSizeReadFromChannel;
     private final Path path;
     private long channelPosition;
@@ -83,7 +83,14 @@ public final class RecordIOReader implements Closeable {
         while (lowBlock < highBlock) {
             int middle = (int) Math.ceil((highBlock + lowBlock) / 2.0);
             seekToBlock(middle);
-            T found = keyExtractor.apply(readEvent());
+            byte[] readEvent = readEvent();
+
+            // If the event is null, scan from the low block upwards
+            if (readEvent == null){
+                matchingBlock = lowBlock;
+                break;
+            }
+            T found = keyExtractor.apply(readEvent);
             int compare = keyComparator.compare(found, target);
             if (compare > 0) {
                 highBlock = middle - 1;
@@ -94,24 +101,28 @@ public final class RecordIOReader implements Closeable {
                 break;
             }
         }
+
         if (matchingBlock == UNSET) {
             matchingBlock = lowBlock;
         }
 
         // now sequential scan to event
         seekToBlock(matchingBlock);
-        int currentPosition = 0;
         int compare = -1;
         byte[] event = null;
+        BufferState restorePoint = null;
         while (compare < 0) {
-            currentPosition = currentBlock.position();
+            // Save the buffer state when reading the next event, to restore to if a matching event is found.
+            restorePoint = saveBufferState();
             event = readEvent();
             if (event == null) {
                 return null;
             }
             compare = keyComparator.compare(keyExtractor.apply(event), target);
         }
-        currentBlock.position(currentPosition);
+        if (restorePoint != null) {
+            restoreFrom(restorePoint);
+        }
         return event;
     }
 
@@ -119,18 +130,19 @@ public final class RecordIOReader implements Closeable {
         return channelPosition;
     }
 
-   void consumeBlock(boolean rewind) throws IOException {
+    int consumeBlock(boolean rewind) throws IOException {
         if (rewind) {
             currentBlockSizeReadFromChannel = 0;
             currentBlock.rewind();
         } else if (currentBlockSizeReadFromChannel == BLOCK_SIZE) {
             // already read enough, no need to read more
-            return;
+            return currentBlockSizeReadFromChannel;
         }
         int originalPosition = currentBlock.position();
         int read = channel.read(currentBlock);
         currentBlockSizeReadFromChannel += (read > 0) ? read : 0;
         currentBlock.position(originalPosition);
+        return read;
     }
 
     /**
@@ -146,8 +158,8 @@ public final class RecordIOReader implements Closeable {
      */
      int seekToStartOfEventInBlock() {
          // Already consumed all the bytes in this block.
-        if (currentBlock.position() >= currentBlockSizeReadFromChannel){
-             return -1;
+         if (currentBlock.position() >= currentBlockSizeReadFromChannel){
+            return -1;
          }
          while (true) {
              RecordType type = RecordType.fromByte(currentBlock.array()[currentBlock.arrayOffset() + currentBlock.position()]);
@@ -182,7 +194,6 @@ public final class RecordIOReader implements Closeable {
             }
         }
     }
-
     private void maybeRollToNextBlock() throws IOException {
         // check block position state
         if (currentBlock.remaining() < RECORD_HEADER_SIZE + 1) {
@@ -232,5 +243,26 @@ public final class RecordIOReader implements Closeable {
     @Override
     public void close() throws IOException {
         channel.close();
+    }
+
+    private BufferState saveBufferState() throws IOException {
+        BufferState bufferState = new BufferState();
+        bufferState.channelPosition = channel.position();
+        bufferState.currentBlockPosition = currentBlock.position();
+        bufferState.currentBlockSizeReadFromChannel = this.currentBlockSizeReadFromChannel;
+        return bufferState;
+    }
+
+    private void restoreFrom(BufferState bufferState) throws IOException {
+        this.currentBlock.position(bufferState.currentBlockPosition);
+        this.currentBlockSizeReadFromChannel = bufferState.currentBlockSizeReadFromChannel;
+        this.channel.position(bufferState.channelPosition);
+        this.channelPosition = channel.position();
+    }
+
+    final static class BufferState {
+        int currentBlockPosition;
+        int currentBlockSizeReadFromChannel;
+        long channelPosition;
     }
 }

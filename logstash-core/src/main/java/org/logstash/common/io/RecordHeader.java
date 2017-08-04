@@ -51,6 +51,7 @@ public class RecordHeader {
     }
 
     public static RecordHeader get(ByteBuffer currentBlock) {
+//        System.out.println("Getting record  header cb osition = " + currentBlock.position() + ", limit is " + currentBlock.limit());
         RecordType type = RecordType.fromByte(currentBlock.get());
 
         if (type == null) {

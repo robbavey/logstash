@@ -65,13 +65,21 @@ public final class DeadLetterQueueReader implements Closeable {
             currentReader = new RecordIOReader(segment);
             byte[] event = currentReader.seekToNextEventPosition(timestamp, (b) -> {
                 try {
-                    return DLQEntry.deserialize(b).getEntryTime();
+                    if (b == null){
+                        return null;
+                    }
+                    Timestamp ts = DLQEntry.deserialize(b).getEntryTime();
+//                    System.out.println("Comparing " + ts);
+                    return ts;
                 } catch (IOException e) {
                     return null;
                 }
             }, Timestamp::compareTo);
+
             if (event != null) {
                 return;
+            }else{
+//                System.out.println("Moving on to next segment");
             }
         }
         currentReader.close();

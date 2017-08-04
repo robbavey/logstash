@@ -148,7 +148,7 @@ public class DeadLetterQueueReaderTest {
         Event event = new Event(Collections.emptyMap());
         long currentEpoch = System.currentTimeMillis();
         int TARGET_EVENT = 543;
-
+        System.out.println("looking for "+ new Timestamp(currentEpoch + TARGET_EVENT));
         writeEntries(event, 0, 1000, currentEpoch);
         seekReadAndVerify(new Timestamp(currentEpoch + TARGET_EVENT),
                           String.valueOf(TARGET_EVENT));
@@ -305,10 +305,105 @@ public class DeadLetterQueueReaderTest {
                           String.valueOf(FIRST_WRITE_EVENT_COUNT));
     }
 
+    @Test
+    public void testStraddledSeek() throws Exception {
+        long now = System.currentTimeMillis();
+        Timestamp seekTarget = new Timestamp(now);
+        try(DeadLetterQueueWriter writeManager = new DeadLetterQueueWriter(dir, 10_000_000, 100_000_000)) {
+            char[] tooBig = new char[(BLOCK_SIZE) + 0];
+            Arrays.fill(tooBig, 'x');
+
+            Event event = new Event();
+            event.setField("message", new String(tooBig));
+            DLQEntry entry = new DLQEntry(event, "foo", "bar", String.valueOf(1), new Timestamp(now));
+            writeManager.writeEntry(entry);
+//            entry = new DLQEntry(event, "foo", "bar", String.valueOf(1), new Timestamp(now + 100));
+//            writeManager.writeEntry(entry);
+        }
+        try(DeadLetterQueueReader readManager = new DeadLetterQueueReader(dir)) {
+            System.out.println("looking for "+ new Timestamp(now));
+            readManager.seekToNextEvent(new Timestamp(now));
+            for (int i = 0;i < 2;i++) {
+                DLQEntry readEntry = readManager.pollEntry(100);
+                System.out.println("****** " + readEntry);
+            }
+            readManager.pollEntry(100);
+            readManager.pollEntry(100);
+//            assertThat(readEntry.getReason(), equalTo("1"));
+//            assertThat(readEntry.getEntryTime().toIso8601(), equalTo(seekTarget.toIso8601()));
+        }
+    }
+
+    @Test
+    public void testStraddledSeekNotInFirstSegment() throws Exception {
+        long now = System.currentTimeMillis();
+        Timestamp seekTarget = new Timestamp(now);
+        writeBlockSizedEntries(4, now);
+        int delta = 10000;
+        long ts = now + delta;
+        long originalTs = ts;
+        try(DeadLetterQueueWriter writeManager = new DeadLetterQueueWriter(dir, 10_000_000, 100_000_000)) {
+            char[] tooBig = new char[12000];
+            Arrays.fill(tooBig, 'c');
+
+            Event event = new Event();
+            event.setField("message", new String(tooBig));
+            for (int i = 0;i < 3;i++) {
+                System.out.println("Writing event with " + new Timestamp(ts));
+                DLQEntry entry = new DLQEntry(event, "", "", "X" + i, new Timestamp(ts));
+                writeManager.writeEntry(entry);
+                ts += delta;
+            }
+
+//            entry = new DLQEntry(event, "foo", "bar", String.valueOf(1), new Timestamp(now + 100));
+//            writeManager.writeEntry(entry);
+        }
+        for (int i = 0;i < 3;i++) {
+            seekReadAndVerify(new Timestamp(originalTs), "X" + i);
+            originalTs += delta;
+        }
+//        try(DeadLetterQueueReader readManager = new DeadLetterQueueReader(dir)) {
+//            System.out.println("looking for " + new Timestamp(originalTs));
+//            readManager.seekToNextEvent(new Timestamp(originalTs));
+//
+//            for (int i = 0;i < 10;i++) {
+//                DLQEntry readEntry = readManager.pollEntry(100);
+//                System.out.println(" ************" + readEntry);
+//            }
+//            System.out.println(readManager.pollEntry(100));
+//            readManager.pollEntry(100);
+////            assertThat(readEntry.getReason(), equalTo("1"));
+////            assertThat(readEntry.getEntryTime().toIso8601(), equalTo(seekTarget.toIso8601()));
+//        }
+    }
+
+
+
+    @Test
+    public void testTestStraddledSeek() throws Exception {
+        long now = System.currentTimeMillis();
+        Timestamp seekTarget = new Timestamp(now);
+        try(DeadLetterQueueWriter writeManager = new DeadLetterQueueWriter(dir, 10_000_000, 100_000_000)) {
+            char[] tooBig = new char[(BLOCK_SIZE / 2) - 1];
+            Arrays.fill(tooBig, 'c');
+
+            Event event = new Event();
+            event.setField("message", new String(tooBig));
+            DLQEntry entry = new DLQEntry(event, "foo", "bar", String.valueOf(1), new Timestamp(now));
+            writeManager.writeEntry(entry);
+            entry = new DLQEntry(event, "foo", "bar", String.valueOf(1), new Timestamp(now + 100));
+            writeManager.writeEntry(entry);
+        }
+
+        seekReadAndVerify(new Timestamp(now + 100), "1");
+    }
+
     private void seekReadAndVerify(final Timestamp seekTarget, final String expectedValue) throws Exception {
+        System.out.println("Attemoting to match " + seekTarget);
         try(DeadLetterQueueReader readManager = new DeadLetterQueueReader(dir)) {
             readManager.seekToNextEvent(new Timestamp(seekTarget));
             DLQEntry readEntry = readManager.pollEntry(100);
+            System.out.println(readEntry);
             assertThat(readEntry.getReason(), equalTo(expectedValue));
             assertThat(readEntry.getEntryTime().toIso8601(), equalTo(seekTarget.toIso8601()));
         }
@@ -318,6 +413,24 @@ public class DeadLetterQueueReaderTest {
         try(DeadLetterQueueWriter writeManager = new DeadLetterQueueWriter(dir, 10 * 1024 * 1024, 10_000_000)) {
             for (int i = offset; i <= offset + numberOfEvents; i++) {
                 DLQEntry entry = new DLQEntry(event, "foo", "bar", String.valueOf(i), new Timestamp(startTime++));
+                writeManager.writeEntry(entry);
+            }
+        }
+    }
+
+    private void writeBlockSizedEntries(int numberOfEvents, long startTime) throws IOException {
+        final int PAD_FOR_BLOCK_SIZE_EVENT = 32616;
+        writeEventWithPadding(4, PAD_FOR_BLOCK_SIZE_EVENT, startTime);
+    }
+
+    private void writeEventWithPadding(int numberOfEvents, int padding, long startTime) throws IOException {
+        Event event = new Event();
+        char[] field = new char[padding];
+        Arrays.fill(field, 'e');
+        event.setField("T", new String(field));
+        try(DeadLetterQueueWriter writeManager = new DeadLetterQueueWriter(dir, 10 * 1024 * 1024, 10_000_000)) {
+            for (int i = 0; i <= numberOfEvents; i++) {
+                DLQEntry entry = new DLQEntry(event, "", "", "", new Timestamp(startTime++));
                 writeManager.writeEntry(entry);
             }
         }
