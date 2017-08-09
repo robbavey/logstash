@@ -134,21 +134,29 @@ public class RecordIOReaderTest {
         int blocks = (int)Math.ceil(expectedSize / (double)BLOCK_SIZE);
         int fillSize = (int) (expectedSize - (blocks * RECORD_HEADER_SIZE));
 
-        try(RecordIOWriter writer = new RecordIOWriter(file)){
+        RecordIOWriter writer = null;
+        try {
+            writer = new RecordIOWriter(file);
             for (char i = 0; i < eventCount; i++) {
                 char[] blockSize = fillArray(fillSize);
                 blockSize[0] = i;
                 assertThat(writer.writeEvent(new StringElement(new String(blockSize)).serialize()), is((long)expectedSize));
             }
+        } finally {
+            if (writer != null) writer.close();
         }
 
-        try(RecordIOReader reader = new RecordIOReader(file)) {
+        RecordIOReader reader = null;
+        try {
+            reader = new RecordIOReader(file);
             Function<byte[], Character> toChar = (b) -> (char) ByteBuffer.wrap(b).get(0);
 
             for (char i = 0; i < eventCount; i++) {
                 reader.seekToNextEventPosition(i, toChar, Comparator.comparing(o -> ((Character) o)));
                 assertThat(toChar.apply(reader.readEvent()), equalTo(i));
             }
+        } finally {
+            reader.close();
         }
     }
 

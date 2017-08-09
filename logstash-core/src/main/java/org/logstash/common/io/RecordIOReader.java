@@ -260,7 +260,6 @@ public class RecordIOReader {
         this.channel.position(bufferState.channelPosition);
         this.channelPosition = channel.position();
         this.currentBlockSizeReadFromChannel = bufferState.currentBlockSizeReadFromChannel;
-
     }
 
     final static class BufferState {
