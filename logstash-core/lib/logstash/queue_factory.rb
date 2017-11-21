@@ -3,11 +3,12 @@ require "fileutils"
 require "logstash/event"
 require "logstash/namespace"
 require "logstash/util/wrapped_acked_queue"
+require "logstash/util/wrapped_direct_queue"
 require "logstash/util/wrapped_synchronous_queue"
 
 module LogStash
   class QueueFactory
-    def self.create(settings)
+    def self.create(settings, pipeline)
       queue_type = settings.get("queue.type")
       queue_page_capacity = settings.get("queue.page_capacity")
       queue_max_bytes = settings.get("queue.max_bytes")
@@ -19,6 +20,8 @@ module LogStash
       queue_path = ::File.join(settings.get("path.queue"), settings.get("pipeline.id"))
 
       case queue_type
+        when "end_to_end"
+          LogStash::Util::WrappedDirectQueue.new(pipeline)
       when "memory_acked"
         # memory_acked is used in tests/specs
         FileUtils.mkdir_p(queue_path)

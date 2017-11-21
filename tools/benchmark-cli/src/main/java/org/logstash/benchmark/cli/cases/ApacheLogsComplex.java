@@ -49,7 +49,7 @@ public final class ApacheLogsComplex implements Case {
     public ApacheLogsComplex(final DataStore store, final LogstashInstallation logstash,
         final Path cwd, final Properties settings, final UserOutput output,
         final BenchmarkMeta runConfig) throws IOException, NoSuchAlgorithmException {
-        data = cwd.resolve("data_apache").resolve("apache_access_logs").toFile();
+        data = cwd.resolve("data_apache").resolve("apache_logs").toFile();
         ensureDatafile(
             data.toPath().getParent().toFile(),
             settings.getProperty(LsBenchSettings.APACHE_DATASET_URL), output

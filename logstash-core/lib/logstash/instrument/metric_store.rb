@@ -222,24 +222,28 @@ module LogStash module Instrument
       key_candidates = extract_filter_keys(key_paths.shift)
 
       key_candidates.each do |key_candidate|
-        raise MetricNotFound, "For path: #{key_candidate}. Map keys: #{map.keys}" if map[key_candidate].nil?
 
-        if key_paths.empty? # End of the user requested path
-          if map[key_candidate].is_a?(Concurrent::Map)
-            new_hash[key_candidate] = transform_to_hash(map[key_candidate])
+        # raise MetricNotFound, "For path: #{key_candidate}. Map keys: #{map.keys}"
+        unless map[key_candidate].nil?
+
+          if key_paths.empty? # End of the user requested path
+            if map[key_candidate].is_a?(Concurrent::Map)
+              new_hash[key_candidate] = transform_to_hash(map[key_candidate])
+            else
+              new_hash[key_candidate] = map[key_candidate]
+            end
           else
-            new_hash[key_candidate] = map[key_candidate]
-          end
-        else
-          if map[key_candidate].is_a?(Concurrent::Map)
-            new_hash[key_candidate] = get_recursively(key_paths, map[key_candidate], {})
-          else
-            new_hash[key_candidate] = map[key_candidate]
+            if map[key_candidate].is_a?(Concurrent::Map)
+              new_hash[key_candidate] = get_recursively(key_paths, map[key_candidate], {})
+            else
+              new_hash[key_candidate] = map[key_candidate]
+            end
           end
         end
       end
       return new_hash
     end
+
 
     def extract_filter_keys(key)
       key.to_s.strip.split(FILTER_KEYS_SEPARATOR).map(&:to_sym)

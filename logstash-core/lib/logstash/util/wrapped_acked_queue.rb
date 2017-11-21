@@ -106,6 +106,10 @@ module LogStash; module Util
         @wait_for = wait_for
       end
 
+      def queued?
+        true
+      end
+
       def close
         @queue.close
       end
@@ -298,9 +302,7 @@ module LogStash; module Util
         if @queue.closed?
           raise QueueClosedError.new("Attempted to write a batch to a closed AckedQueue")
         end
-        batch.each do |event|
-          push(event)
-        end
+        batch.each {|event| push(event)}
       end
     end
   end

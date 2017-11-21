@@ -161,7 +161,7 @@ module LogStash; class JavaPipeline < JavaBasePipeline
     super
 
     begin
-      @queue = LogStash::QueueFactory.create(settings)
+      @queue = LogStash::QueueFactory.create(settings, self)
     rescue => e
       @logger.error("Logstash failed to create queue", default_logging_keys("exception" => e.message, "backtrace" => e.backtrace))
       raise e

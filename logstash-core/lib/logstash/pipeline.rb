@@ -171,7 +171,7 @@ module LogStash; class Pipeline < BasePipeline
     super
 
     begin
-      @queue = LogStash::QueueFactory.create(settings)
+      @queue = LogStash::QueueFactory.create(settings, self)
     rescue => e
       @logger.error("Logstash failed to create queue", default_logging_keys("exception" => e.message, "backtrace" => e.backtrace))
       raise e
@@ -297,11 +297,11 @@ module LogStash; class Pipeline < BasePipeline
     wait_inputs
     transition_to_stopped
 
-    @logger.debug("Input plugins stopped! Will shutdown filter/output workers.", default_logging_keys)
+    @logger.info("Input plugins stopped! Will shutdown filter/output workers.", default_logging_keys)
 
     shutdown_flusher
     shutdown_workers
-
+    @signal_queue.put(SHUTDOWN)
     close
 
     @logger.debug("Pipeline has been shutdown", default_logging_keys)
@@ -388,33 +388,57 @@ module LogStash; class Pipeline < BasePipeline
         @logger.warn("CAUTION: Recommended inflight events max exceeded! Logstash will run with up to #{max_inflight} events in memory in your current configuration. If your message sizes are large this may cause instability with the default heap size. Please consider setting a non-standard heap size, changing the batch size (currently #{batch_size}), or changing the number of pipeline workers (currently #{pipeline_workers})", default_logging_keys)
       end
 
-      pipeline_workers.times do |t|
-        thread = Thread.new(batch_size, batch_delay, self) do |_b_size, _b_delay, _pipeline|
-          _pipeline.worker_loop(_b_size, _b_delay)
-        end
-        thread.name="[#{pipeline_id}]>worker#{t}"
-        @worker_threads << thread
-      end
+      if @filter_queue_client.queued?
 
-      # inputs should be started last, after all workers
-      begin
-        start_inputs
-      rescue => e
-        # if there is any exception in starting inputs, make sure we shutdown workers.
-        # exception will already by logged in start_inputs
-        shutdown_workers
-        raise e
+        pipeline_workers.times do |t|
+          thread = Thread.new(batch_size, batch_delay, self) do |_b_size, _b_delay, _pipeline|
+            _pipeline.worker_loop(_b_size, _b_delay)
+          end
+          thread.name="[#{pipeline_id}]>worker#{t}"
+          @worker_threads << thread
+        end
+
+        # inputs should be started last, after all workers
+        begin
+          start_inputs
+        rescue => e
+          # if there is any exception in starting inputs, make sure we shutdown workers.
+          # exception will already by logged in start_inputs
+          shutdown_workers
+          raise e
+        ensure
+          # it is important to guarantee @ready to be true after the startup sequence has been completed
+          # to potentially unblock the shutdown method which may be waiting on @ready to proceed
+          @ready.make_true
+        end
+      else
+        register_plugins(@inputs)
+        @inputs.each { |input| start_input(input)}
       end
-    ensure
-      # it is important to guarantee @ready to be true after the startup sequence has been completed
-      # to potentially unblock the shutdown method which may be waiting on @ready to proceed
-      @ready.make_true
     end
   end
 
   def dlq_enabled?
     @settings.get("dead_letter_queue.enable")
   end
+
+
+  # Main body of what a worker thread does
+  # Repeatedly takes batches off the queue, filters, then outputs them
+  def signal_loop
+    shutdown_requested = false
+    while true
+      # RWB> This part of the loop determines whether or not a signal has been added to shutdown the pipeline.
+
+      signal = @signal_queue.poll || NO_SIGNAL
+      puts "My signal is #{signal.class}"
+
+      shutdown_requested |= signal.shutdown? # latch on shutdown signal
+      sleep 5
+      break if shutdown_requested
+    end
+  end
+
 
   # Main body of what a worker thread does
   # Repeatedly takes batches off the queue, filters, then outputs them
@@ -451,6 +475,96 @@ module LogStash; class Pipeline < BasePipeline
     @filter_queue_client.close_batch(batch)
   end
 
+  #
+  def inline_process_event(event)
+    # puts 'inline process event'
+    @filter_queue_client.start_metrics(event)
+    @events_consumed.increment(1)
+
+    #RWB> Throw the batch of work through the filters.
+    output_events_map = Hash.new { |h, k| h[k] = [] }
+    filtered_events = []
+
+    filter_func([event]).each do |e|
+      filtered_events << e unless e.cancelled?
+    end
+
+    if filtered_events.size > 0
+      #RWB> If there are any items to run through output plugins then pass them in.
+      output_batch(filtered_events, output_events_map)
+    end
+    @filter_queue_client.close_batch([event])
+  end
+
+  def inline_process_batch(batch)
+    @filter_queue_client.start_metrics(batch)
+      batch_size = batch.size
+      if batch_size > 0
+        @events_consumed.increment(batch_size)
+
+        #RWB> Throw the batch of work through the filters.
+        filtered_events = []
+        filter_func(batch).each do |e|
+          filtered_events << e unless e.cancelled?
+        end
+      end
+
+      return_val = nil
+
+      output_events_map = Hash.new { |h, k| h[k] = [] }
+      if filtered_events.size > 0
+        #RWB> If there are any items to run through output plugins then pass them in.
+        return_val = output_batch(filtered_events, output_events_map)
+      end
+      @filter_queue_client.close_batch(batch)
+      return_val
+    end
+
+  def inline_process_batch_with_feedback(batch)
+    @filter_queue_client.start_metrics(batch)
+    batch_size = batch.size
+    if batch_size > 0
+      @events_consumed.increment(batch_size)
+
+      #RWB> Throw the batch of work through the filters.
+      filtered_events = []
+
+      filter_func(batch).each do |e|
+        filtered_events << e unless e.cancelled?
+      end
+    end
+
+    output_events_map = Hash.new { |h, k| h[k] = [] }
+    if filtered_events.size > 0
+      #RWB> If there are any items to run through output plugins then pass them in.
+      output_batch(filtered_events, output_events_map)
+    end
+    @filter_queue_client.close_batch(batch)
+    output_events_map
+  end
+
+
+  def process_batch(batch, signal)
+    batch_size = batch.size
+    if batch_size > 0
+      @events_consumed.increment(batch_size)
+
+      #RWB> Throw the batch of work through the filters.
+      filter_batch(batch)
+    end
+    # RWB> If flush is called, then flush any old events to the batch.
+    # RWB> This looks doomed.
+    flush_filters_to_batch(batch, :final => false) if signal.flush?
+
+    output_events_map = Hash.new { |h, k| h[k] = [] }
+    if batch.size > 0
+      #RWB> If there are any items to run through output plugins then pass them in.
+      output_batch(batch, output_events_map)
+      @filter_queue_client.close_batch(batch)
+    end
+    output_events_map
+  end
+
   def filter_batch(batch)
     filter_func(batch.to_a).each do |e|
       #these are both original and generated events
@@ -483,12 +597,14 @@ module LogStash; class Pipeline < BasePipeline
     end
     # Now that we have our output to event mapping we can just invoke each output
     # once with its list of events
+    last_ack = -1
     output_events_map.each do |output, events|
-      output.multi_receive(events)
+      last_ack = output.multi_receive(events)
       events.clear
     end
 
-    @filter_queue_client.add_output_metrics(batch.filtered_size)
+    @filter_queue_client.add_output_metrics(batch.size)
+    last_ack
   end
 
   def wait_inputs
@@ -512,6 +628,8 @@ module LogStash; class Pipeline < BasePipeline
     # then after all input plugins are successfully registered, start them
     @inputs.each { |input| start_input(input) }
   end
+
+
 
   def start_input(plugin)
     @input_threads << Thread.new { inputworker(plugin) }
@@ -585,8 +703,10 @@ module LogStash; class Pipeline < BasePipeline
   # This also stops all filter and output plugins
   def shutdown_workers
     # Each worker thread will receive this exactly once!
+    @logger.error("Shutting down workers")
     @worker_threads.each do |t|
       @logger.debug("Pushing shutdown", default_logging_keys(:thread => t.inspect))
+      @logger.error("Sending shutdown to signal queue")
       @signal_queue.put(SHUTDOWN)
     end
 

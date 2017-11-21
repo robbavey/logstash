@@ -41,6 +41,15 @@ module LogStash module Instrument
       result
     end
 
+    # def push_batch_with_callback(batch, callback)
+    #   increment_counters(batch.size)
+    #   start_time = java.lang.System.nano_time
+    #   result = @write_client.push_batch_with_callback(batch, callback)
+    #   report_execution_time(start_time)
+    #   result
+    # end
+
+
     private
 
     def increment_counters(size)

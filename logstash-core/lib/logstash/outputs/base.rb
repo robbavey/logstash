@@ -84,6 +84,7 @@ class LogStash::Outputs::Base < LogStash::Plugin
   end # def receive
 
   public
+
   # To be overridden in implementations
   def multi_receive(events)
     if @receives_encoded

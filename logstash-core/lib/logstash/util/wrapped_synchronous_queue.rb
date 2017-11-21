@@ -41,6 +41,10 @@ module LogStash; module Util
         @wait_for = TimeUnit::NANOSECONDS.convert(wait_for, TimeUnit::MILLISECONDS)
       end
 
+      def queued?
+        true
+      end
+
       def close
         # noop, compat with acked queue read client
       end
@@ -170,6 +174,11 @@ module LogStash; module Util
       def push_batch(batch)
         LsQueueUtils.addAll(@queue, batch)
       end
+
+      # def push_batch_with_callback(batch, callback)
+      #   LsQueueUtils.addAll(@queue, batch)
+      # end
+
     end
   end
 end end

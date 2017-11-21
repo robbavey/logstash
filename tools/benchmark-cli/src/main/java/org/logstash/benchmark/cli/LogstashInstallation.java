@@ -150,6 +150,7 @@ public interface LogstashInstallation {
         @Override
         public void execute(final String configuration, final File data, final int repeat)
             throws IOException, InterruptedException {
+            System.out.println("configuration is " + configuration);
             final Path cfg = location.resolve("config.temp");
             Files.write(
                 cfg,
@@ -186,7 +187,9 @@ public interface LogstashInstallation {
             try {
                 Files.write(
                     logstashYml, String.format(
-                        "pipeline.workers: %d\npipeline.batch.size: %d", meta.getWorkers()
+                        "pipeline.workers: %d\n" +
+                                "pipeline.batch.size: %d\n" +
+                                "queue.type: end_to_end", meta.getWorkers()
                         , meta.getBatchsize()
                     ).getBytes(StandardCharsets.UTF_8),
                     StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING,
