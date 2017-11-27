@@ -11,6 +11,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+
+import org.apache.logging.log4j.LogManager;
 import org.codehaus.commons.compiler.CompileException;
 import org.codehaus.janino.ClassBodyEvaluator;
 import org.jruby.RubyArray;
@@ -129,6 +131,7 @@ public final class DatasetCompiler {
                     ).map(Class::getName).toArray(String[]::new)
                 );
                 se.cook(new StringReader(join(fieldsAndCtor(classname, fieldValues), source)));
+                LogManager.getLogger(DatasetCompiler.class).error(source);
                 clazz = se.getClazz();
                 CLASS_CACHE.put(source, clazz);
             }

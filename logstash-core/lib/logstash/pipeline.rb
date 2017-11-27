@@ -520,30 +520,6 @@ module LogStash; class Pipeline < BasePipeline
       return_val
     end
 
-  def inline_process_batch_with_feedback(batch)
-    @filter_queue_client.start_metrics(batch)
-    batch_size = batch.size
-    if batch_size > 0
-      @events_consumed.increment(batch_size)
-
-      #RWB> Throw the batch of work through the filters.
-      filtered_events = []
-
-      filter_func(batch).each do |e|
-        filtered_events << e unless e.cancelled?
-      end
-    end
-
-    output_events_map = Hash.new { |h, k| h[k] = [] }
-    if filtered_events.size > 0
-      #RWB> If there are any items to run through output plugins then pass them in.
-      output_batch(filtered_events, output_events_map)
-    end
-    @filter_queue_client.close_batch(batch)
-    output_events_map
-  end
-
-
   def process_batch(batch, signal)
     batch_size = batch.size
     if batch_size > 0

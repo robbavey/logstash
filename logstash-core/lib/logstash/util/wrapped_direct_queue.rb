@@ -6,33 +6,38 @@ module LogStash; module Util
 
 # This class pushes events straight to the filters, and then the outputs. This
 class WrappedDirectQueue
+  include LogStash::Util::Loggable
   java_import java.util.Arrays
   java_import java.util.ArrayList
   java_import java.util.concurrent.CompletableFuture
   java_import java.util.concurrent.Executors
   java_import java.util.concurrent.atomic.LongAdder
   def initialize (pipeline)
+    @e2e_warned = Concurrent::AtomicBoolean.new(false)
     @pipeline = pipeline
+    @execution_map = Concurrent::Map.new
+    @sent_items = LongAdder.new
   end
 
-  attr_reader :queue, :pipeline
+  attr_reader :queue, :pipeline, :execution
 
   # Push an object to the queue if the queue is full
   # it will block until the object can be added to the queue.
   #
   # @param [obj] Object to add to the queue
   def push(obj)
-    @pipeline.inline_process_event(obj)
+    logger.warn "Pipeline contains inputs that do not support end to end execution. Please change pipeline type for better performance" if @e2e_warned.make_true
+    @pipeline.process_batch([obj], get_execution)
   end
   alias_method(:<<, :push)
 
-
   def push_batch(batch)
-    @pipeline.inline_process_batch(batch)
+    @sent_items.add(batch.size)
+    @pipeline.process_batch(batch, get_execution)
   end
 
-  def push_batch_with_feedback(batch, feedback)
-    @pipeline.process_batch_with_feedback(batch, feedback)
+  def get_execution
+      @execution_map.compute_if_absent(Thread.current) { @pipeline.build_execution }
   end
 
 # not implementing
@@ -57,7 +62,7 @@ class WrappedDirectQueue
     # in-flight buffers
 
     def initialize(queue, batch_size = 125, wait_for = 250)
-      # @queue = queue
+      @queue = queue
       # # Note that @inflight_batches as a central mechanism for tracking inflight
       # # batches will fail if we have multiple read clients in the pipeline.
       @inflight_batches = Concurrent::Map.new
@@ -172,50 +177,70 @@ class WrappedDirectQueue
     end
   end
 
-  class ReadBatch
-    def initialize(queue, size, wait)
-      # TODO: disabled for https://github.com/elastic/logstash/issues/6055 - will have to properly refactor
-      # @cancelled = Hash.new
+  # class ReadBatch
+  #   include LogStash::Util::Loggable
+  #   def initialize(queue, size, wait)
+  #     logger.warn "Initializing read batch with queue: #{queue}, size: #{size}, wait:#{wait}"
+  #     # TODO: disabled for https://github.com/elastic/logstash/issues/6055 - will have to properly refactor
+  #     # @cancelled = Hash.new
+  #
+  #     #Sizing HashSet to size/load_factor to ensure no rehashing
+  #     # @originals = LsQueueUtils.drain(queue.queue, size, wait)
+  #   end
+  #
+  #   def merge(event)
+  #     # puts " I am merging an evnt"
+  #     return if event.nil?
+  #     # @originals.add(event)
+  #   end
+  #
+  #   # def cancel(event)
+  #   #   # TODO: disabled for https://github.com/elastic/logstash/issues/6055 - will have to properly refactor
+  #   #   raise("cancel is unsupported")
+  #   #   # @cancelled[event] = true
+  #   # end
+  #
+  #   # def to_a
+  #   #   events = []
+  #   #   # @originals.each {|e| events << e unless e.cancelled?}
+  #   #   events
+  #   # end
+  #
+  #   # def each(&blk)
+  #   #   # below the checks for @cancelled.include?(e) have been replaced by e.cancelled?
+  #   #   # TODO: for https://github.com/elastic/logstash/issues/6055 = will have to properly refactor
+  #   #   # @originals.each {|e| blk.call(e) unless e.cancelled?}
+  #   #
+  #   # end
+  #
+  #   # def filtered_size
+  #   #   # @originals.size
+  #   # end
+  #   #
+  #   # alias_method(:size, :filtered_size)
+  #
+  #   # def cancelled_size
+  #   #   # TODO: disabled for https://github.com/elastic/logstash/issues/6055 = will have to properly refactor
+  #   #   raise("cancelled_size is unsupported ")
+  #   #   # @cancelled.size
+  #   # end
+  # end
 
-      #Sizing HashSet to size/load_factor to ensure no rehashing
-      # @originals = LsQueueUtils.drain(queue.queue, size, wait)
+  class NamedThreadFactory
+    java_import java.util.concurrent.ThreadFactory
+    include ThreadFactory
+
+    def initialize(name)
+      @name = name
+
+      @@counter = Concurrent::AtomicFixnum.new(0)
     end
 
-    def merge(event)
-      return if event.nil?
-      # @originals.add(event)
+    def newThread(runnable)
+      thread = java.lang.Thread.new(runnable)
+      thread.name = "#{@name}-#{SecureRandom.hex(10)}-#{@@counter.increment}"
+      thread
     end
-
-    # def cancel(event)
-    #   # TODO: disabled for https://github.com/elastic/logstash/issues/6055 - will have to properly refactor
-    #   raise("cancel is unsupported")
-    #   # @cancelled[event] = true
-    # end
-
-    # def to_a
-    #   events = []
-    #   # @originals.each {|e| events << e unless e.cancelled?}
-    #   events
-    # end
-
-    # def each(&blk)
-    #   # below the checks for @cancelled.include?(e) have been replaced by e.cancelled?
-    #   # TODO: for https://github.com/elastic/logstash/issues/6055 = will have to properly refactor
-    #   # @originals.each {|e| blk.call(e) unless e.cancelled?}
-    #
-    # end
-
-    # def filtered_size
-    #   # @originals.size
-    # end
-    #
-    # alias_method(:size, :filtered_size)
-
-    # def cancelled_size
-    #   # TODO: disabled for https://github.com/elastic/logstash/issues/6055 = will have to properly refactor
-    #   raise("cancelled_size is unsupported ")
-    #   # @cancelled.size
-    # end
   end
 
   class WriteClient
@@ -223,7 +248,7 @@ class WrappedDirectQueue
     def initialize(queue)
       @queue = queue
       @pipeline = queue.pipeline
-      @executor_service = Executors.new_fixed_thread_pool(@pipeline.settings.get_default("pipeline.workers"))
+      @executor_service = Executors.new_fixed_thread_pool(@pipeline.settings.get_default("pipeline.workers"), NamedThreadFactory.new("e2e-worker"))
       @batch_id = LongAdder.new
     end
 
@@ -244,20 +269,14 @@ class WrappedDirectQueue
 
     def push_batch(batch)
       @batch_id.increment
-      logger.warn "push batch #{@batch_id},slice size of #{@pipeline.settings.get("pipeline.batch.size")}, workers - #{@pipeline.settings.get("pipeline.workers")}"
       completable_futures = []
-
-      batch.each_slice(@pipeline.settings.get_default("pipeline.batch.size")) do |slice|
-        CompletableFuture.async_supply_stage(@executor_service) { @queue.push_batch(slice) }
+      batch.each_slice(@pipeline.settings.get("pipeline.batch.size")) do |slice|
+        completable_futures << CompletableFuture.async_supply_stage(@executor_service) { @queue.push_batch(slice) }
       end
       completable_futures.to_java CompletableFuture
       CompletableFuture.all_of(completable_futures.to_java CompletableFuture).get
+      logger.debug "completed batch of #{batch.size}"
     end
-
-    # def push_batch_with_callback(batch, callback)
-    #   push_batch(batch)
-    #   callback.on_complete(@batch_id.long_value, batch.last)
-    # end
 
   end
 end; end; end

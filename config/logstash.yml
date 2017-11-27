@@ -1,3 +1,5 @@
 #pipeline.workers: 16
-pipeline.batch.size: 128
+#pipeline.batch.size: 256
 queue.type: end_to_end
+pipeline.java_execution: true
+

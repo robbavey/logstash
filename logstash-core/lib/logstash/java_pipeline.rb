@@ -158,6 +158,9 @@ module LogStash; class JavaPipeline < JavaBasePipeline
     @reporter = PipelineReporter.new(@logger, self)
     @worker_threads = []
 
+    @pipeline_threads = Concurrent::Map.new
+
+    @counter = Concurrent::AtomicFixnum.new(0)
     super
 
     begin
@@ -367,31 +370,43 @@ module LogStash; class JavaPipeline < JavaBasePipeline
         @logger.warn("CAUTION: Recommended inflight events max exceeded! Logstash will run with up to #{max_inflight} events in memory in your current configuration. If your message sizes are large this may cause instability with the default heap size. Please consider setting a non-standard heap size, changing the batch size (currently #{batch_size}), or changing the number of pipeline workers (currently #{pipeline_workers})", default_logging_keys)
       end
 
-      @filter_queue_client.set_batch_dimensions(batch_size, batch_delay)
+      if @filter_queue_client.queued?
 
-      pipeline_workers.times do |t|
-        batched_execution = @lir_execution.buildExecution
-        thread = Thread.new(self, batched_execution) do |_pipeline, _batched_execution|
-          _pipeline.worker_loop(_batched_execution)
+        @filter_queue_client.set_batch_dimensions(batch_size, batch_delay)
+
+        pipeline_workers.times do |t|
+          batched_execution = @lir_execution.buildExecution
+
+          thread = Thread.new(self, batched_execution) do |_pipeline, _batched_execution|
+            _pipeline.worker_loop(_batched_execution)
+          end
+          thread.name="[#{pipeline_id}]>worker#{t}"
+          @worker_threads << thread
         end
-        thread.name="[#{pipeline_id}]>worker#{t}"
-        @worker_threads << thread
+
+        # inputs should be started last, after all workers
+        begin
+          start_inputs
+        rescue => e
+          # if there is any exception in starting inputs, make sure we shutdown workers.
+          # exception will already by logged in start_inputs
+          shutdown_workers
+          raise e
+        end
+      else
+        register_plugins(@inputs)
+        @inputs.each { |input| start_input(input)}
       end
 
-      # inputs should be started last, after all workers
-      begin
-        start_inputs
-      rescue => e
-        # if there is any exception in starting inputs, make sure we shutdown workers.
-        # exception will already by logged in start_inputs
-        shutdown_workers
-        raise e
-      end
     ensure
       # it is important to guarantee @ready to be true after the startup sequence has been completed
       # to potentially unblock the shutdown method which may be waiting on @ready to proceed
       @ready.make_true
     end
+  end
+
+  def build_execution
+    @lir_execution.buildExecution
   end
 
   def dlq_enabled?
@@ -407,8 +422,10 @@ module LogStash; class JavaPipeline < JavaBasePipeline
       shutdown_requested |= signal.shutdown? # latch on shutdown signal
 
       batch = @filter_queue_client.read_batch # metrics are started in read_batch
-      @events_consumed.increment(batch.size)
-      execute_batch(batched_execution, batch, signal.flush?)
+      if batch.size > 0
+        @events_consumed.increment(batch.size)
+        execute_batch(batched_execution, batch, signal.flush?)
+      end
       @filter_queue_client.close_batch(batch)
       # keep break at end of loop, after the read_batch operation, some pipeline specs rely on this "final read_batch" before shutdown.
       break if (shutdown_requested && !draining_queue?)
@@ -449,6 +466,7 @@ module LogStash; class JavaPipeline < JavaBasePipeline
   end
 
   def inputworker(plugin)
+    logger.warn " Creating input worker for #{plugin} - thread name is [#{pipeline_id}]<#{plugin.class.config_name}"
     Util::set_thread_name("[#{pipeline_id}]<#{plugin.class.config_name}")
     begin
       input_queue_client = wrapped_write_client(plugin)
@@ -476,6 +494,21 @@ module LogStash; class JavaPipeline < JavaBasePipeline
       plugin.do_close
     end
   end # def inputworker
+
+  def process_batch(batch, batched_execution)
+    @filter_queue_client.start_metrics(batch)
+
+    batch_size = batch.size
+
+    if batch_size > 0
+      @events_consumed.increment(batch_size)
+      @counter.increment(batch_size)
+
+      execute_batch(batched_execution, batch, false)
+      @filter_queue_client.close_batch(batch)
+      batch.size
+    end
+  end
 
   # initiate the pipeline shutdown sequence
   # this method is intended to be called from outside the pipeline thread
@@ -648,9 +681,11 @@ module LogStash; class JavaPipeline < JavaBasePipeline
   def execute_batch(batched_execution, batch, flush)
     batched_execution.compute(batch.to_a, flush, false)
     @events_filtered.increment(batch.size)
-    filtered_size = batch.filtered_size
-    @filter_queue_client.add_output_metrics(filtered_size)
-    @filter_queue_client.add_filtered_metrics(filtered_size)
+
+      # RWB. filtered_size does not yet do anythinfg.
+      filtered_size = batch.size
+      @filter_queue_client.add_output_metrics(filtered_size)
+      @filter_queue_client.add_filtered_metrics(filtered_size)
   rescue Exception => e
     # Plugins authors should manage their own exceptions in the plugin code
     # but if an exception is raised up to the worker thread they are considered
@@ -676,7 +711,6 @@ module LogStash; class JavaPipeline < JavaBasePipeline
     keys[:thread] ||= thread.inspect if thread
     keys
   end
-
   def draining_queue?
     @drain_queue ? !@filter_queue_client.empty? : false
   end
