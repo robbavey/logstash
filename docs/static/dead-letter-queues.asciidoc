@@ -46,8 +46,11 @@ Dead letter queues are stored as files in the local directory of the Logstash
 instance. By default, the dead letter queue files are stored in
 `path.data/dead_letter_queue`. Each pipeline has a separate queue. For example,
 the dead letter queue for the `main` pipeline is stored in
-`LOGSTASH_HOME/data/dead_letter_queue/main` by default. The queue files are
-numbered sequentially: `1.log`, `2.log`, and so on.
+`LOGSTASH_HOME/data/dead_letter_queue/main` by default. Queues are written to a
+sequentially numbered temporary file (`1.log.tmp`, `2.log.tmp`, etc) in this directory,
+and renamed to `1.log`, `2.log`, etc, either when this file has stored a set amount of data, or
+when the `flush_interval` has elapsed since creation, providing an entry has been
+written in that time
 
 You can set `path.dead_letter_queue` in the `logstash.yml` file to
 specify a different path for the files:
@@ -57,9 +60,13 @@ specify a different path for the files:
 path.dead_letter_queue: "path/to/data/dead_letter_queue"
 -------------------------------------------------------------------------------
 
-
 NOTE: You may not use the same `dead_letter_queue` path for two different
 Logstash instances.
+
+You can specify `dead_letter_queue.flush_interval` to set the amount of time between
+creating a dead letter queue file and it being made available to reading. It is
+defaulted to 5 seconds
+
 
 ===== File Rotation
 

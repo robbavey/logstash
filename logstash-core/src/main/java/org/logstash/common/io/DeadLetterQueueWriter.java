@@ -23,9 +23,15 @@ import java.io.IOException;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
@@ -44,43 +50,53 @@ public final class DeadLetterQueueWriter implements Closeable {
     private static final long MAX_SEGMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
     static final String SEGMENT_FILE_PATTERN = "%d.log";
+    static final String TEMP_FILE_PATTERN = "%d.log.tmp";
     static final String LOCK_FILE = ".lock";
+    private final ReentrantLock lock = new ReentrantLock();
     private static final FieldReference DEAD_LETTER_QUEUE_METADATA_KEY =
         FieldReference.from(String.format("%s[dead_letter_queue]", Event.METADATA_BRACKETS));
     private final long maxSegmentSize;
     private final long maxQueueSize;
     private LongAdder currentQueueSize;
     private final Path queuePath;
-    private final FileLock lock;
+    private final FileLock fileLock;
     private volatile RecordIOWriter currentWriter;
     private int currentSegmentIndex;
     private Timestamp lastEntryTimestamp;
+    private Duration flushInterval;
+    private Instant lastWrite;
     private final AtomicBoolean open = new AtomicBoolean(true);
+    private ScheduledExecutorService flushScheduler;
 
-    public DeadLetterQueueWriter(Path queuePath, long maxSegmentSize, long maxQueueSize) throws IOException {
-        this.lock = FileLockFactory.obtainLock(queuePath.toString(), LOCK_FILE);
+    public DeadLetterQueueWriter(final Path queuePath, final long maxSegmentSize, final long maxQueueSize, final Duration flushInterval) throws IOException {
+        this.fileLock = FileLockFactory.obtainLock(queuePath.toString(), LOCK_FILE);
         this.queuePath = queuePath;
         this.maxSegmentSize = maxSegmentSize;
         this.maxQueueSize = maxQueueSize;
+        this.flushInterval = flushInterval;
         this.currentQueueSize = new LongAdder();
         this.currentQueueSize.add(getStartupQueueSize());
 
+        cleanupTempFiles();
         currentSegmentIndex = getSegmentPaths(queuePath)
                 .map(s -> s.getFileName().toString().split("\\.")[0])
                 .mapToInt(Integer::parseInt)
                 .max().orElse(0);
-        nextWriter();
-        this.lastEntryTimestamp = Timestamp.now();
-    }
 
-    /**
-     * Constructor for Writer that uses defaults
-     *
-     * @param queuePath the path to the dead letter queue segments directory
-     * @throws IOException if the size of the file cannot be determined
-     */
-    public DeadLetterQueueWriter(String queuePath) throws IOException {
-        this(Paths.get(queuePath), MAX_SEGMENT_SIZE_BYTES, Long.MAX_VALUE);
+        currentWriter = new RecordIOWriter(queuePath.resolve(String.format(TEMP_FILE_PATTERN, ++currentSegmentIndex)));
+        currentQueueSize.increment();
+
+        this.lastEntryTimestamp = Timestamp.now();
+
+        flushScheduler = Executors.newScheduledThreadPool(1, r -> {
+            Thread t = new Thread(r);
+            //Allow this thread to die when the JVM dies
+            t.setDaemon(true);
+            //Set the name
+            t.setName("dlq-stale-check");
+            return t;
+        });
+        flushScheduler.scheduleAtFixedRate(this::flushCheck, 1L, 1L, TimeUnit.SECONDS);
     }
 
     private long getStartupQueueSize() throws IOException {
@@ -95,30 +111,33 @@ public final class DeadLetterQueueWriter implements Closeable {
                 .sum();
     }
 
-    private void nextWriter() throws IOException {
-        currentWriter = new RecordIOWriter(queuePath.resolve(String.format(SEGMENT_FILE_PATTERN, ++currentSegmentIndex)));
-        currentQueueSize.increment();
+    private static Stream<Path> listFiles(Path path, String suffix) throws IOException {
+        try(final Stream<Path> files = Files.list(path)) {
+            return files.filter(p -> p.toString().endsWith(suffix))
+                    .collect(Collectors.toList()).stream();
+        }
     }
 
     static Stream<Path> getSegmentPaths(Path path) throws IOException {
-        try(final Stream<Path> files = Files.list(path)) {
-            return files.filter(p -> p.toString().endsWith(".log"))
-                .collect(Collectors.toList()).stream();
+        return listFiles(path, ".log");
+    }
+
+    void writeEntry(DLQEntry entry) throws IOException {
+        lock.lock();
+        try {
+            Timestamp entryTimestamp = Timestamp.now();
+            if (entryTimestamp.getTime().isBefore(lastEntryTimestamp.getTime())) {
+                entryTimestamp = lastEntryTimestamp;
+            }
+            innerWriteEntry(entry);
+            lastEntryTimestamp = entryTimestamp;
+        } finally {
+            lock.unlock();
         }
     }
 
-    public synchronized void writeEntry(DLQEntry entry) throws IOException {
-        innerWriteEntry(entry);
-    }
-
-    public synchronized void writeEntry(Event event, String pluginName, String pluginId, String reason) throws IOException {
-        Timestamp entryTimestamp = Timestamp.now();
-        if (entryTimestamp.getTime().isBefore(lastEntryTimestamp.getTime())) {
-            entryTimestamp = lastEntryTimestamp;
-        }
-        DLQEntry entry = new DLQEntry(event, pluginName, pluginId, reason);
-        innerWriteEntry(entry);
-        lastEntryTimestamp = entryTimestamp;
+    public void writeEntry(Event event, String pluginName, String pluginId, String reason) throws IOException {
+        writeEntry(new DLQEntry(event, pluginName, pluginId, reason));
     }
 
     private void innerWriteEntry(DLQEntry entry) throws IOException {
@@ -134,10 +153,10 @@ public final class DeadLetterQueueWriter implements Closeable {
             logger.error("cannot write event to DLQ: reached maxQueueSize of " + maxQueueSize);
             return;
         } else if (currentWriter.getPosition() + eventPayloadSize > maxSegmentSize) {
-            currentWriter.close();
-            nextWriter();
+            finalizeSegment(false);
         }
         currentQueueSize.add(currentWriter.writeEvent(record));
+        lastWrite = Instant.now();
     }
 
     /**
@@ -155,27 +174,70 @@ public final class DeadLetterQueueWriter implements Closeable {
     @Override
     public void close() {
         if (open.compareAndSet(true, false)) {
-            if (currentWriter != null) {
-                try {
-                    currentWriter.close();
-                } catch (Exception e) {
-                    logger.debug("Unable to close dlq writer", e);
-                }
+            try {
+                finalizeSegment(false);
+            } catch (Exception e) {
+                logger.debug("Unable to close dlq writer", e);
             }
-            releaseLock();
+            releaseFileLock();
+            flushScheduler.shutdown();
+        }
+
+    }
+
+    private void flushCheck() {
+        try{
+            finalizeSegment(true);
+        } catch (Exception e){
+            logger.warn("unable to finalize segment", e);
         }
     }
 
-    private void releaseLock() {
+    /**
+     * Determines whether the current writer is stale. It is stale if writes have been performed, but the
+     * last time it was written is beyond the finalizeSegment interval.
+     * @return
+     */
+    private boolean stale(){
+        return currentWriter.hasWritten() && lastWrite != null && Instant.now().minus(flushInterval).isAfter(lastWrite);
+    }
+
+
+    private void finalizeSegment(boolean onlyIfStale) throws IOException {
+        lock.lock();
         try {
-            FileLockFactory.releaseLock(lock);
+            if (onlyIfStale && !stale())
+                return;
+
+            if (currentWriter != null && currentWriter.hasWritten()) {
+                currentWriter.close();
+                Files.move(queuePath.resolve(String.format(TEMP_FILE_PATTERN, currentSegmentIndex)),
+                        queuePath.resolve(String.format(SEGMENT_FILE_PATTERN, currentSegmentIndex)),
+                        StandardCopyOption.ATOMIC_MOVE);
+                if (open.get()) {
+                    currentWriter = new RecordIOWriter(queuePath.resolve(String.format(TEMP_FILE_PATTERN, ++currentSegmentIndex)));
+                    currentQueueSize.increment();
+                }
+            } else {
+                if (RecordIOReader.validNonEmptySegment(queuePath.resolve(String.format(TEMP_FILE_PATTERN, currentSegmentIndex)))) {
+                    Files.delete(queuePath.resolve(String.format(TEMP_FILE_PATTERN, currentSegmentIndex)));
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void releaseFileLock() {
+        try {
+            FileLockFactory.releaseLock(fileLock);
         } catch (IOException e) {
-            logger.debug("Unable to release lock", e);
+            logger.debug("Unable to release fileLock", e);
         }
         try {
             Files.deleteIfExists(queuePath.resolve(LOCK_FILE));
         } catch (IOException e){
-            logger.debug("Unable to delete lock file", e);
+            logger.debug("Unable to delete fileLock file", e);
         }
     }
 
@@ -190,4 +252,29 @@ public final class DeadLetterQueueWriter implements Closeable {
     public long getCurrentQueueSize() {
         return currentQueueSize.longValue();
     }
+
+    private void cleanupTempFiles() throws IOException {
+        // List files that end in temp - check if there is a corresponding .log file - if yes delete, if no remove.
+        DeadLetterQueueWriter.listFiles(queuePath, ".log.tmp")
+                .forEach(this::cleanupFile);
+    }
+
+    private void cleanupFile(final Path file) {
+        String filename = file.getFileName().toString().split("\\.")[0];
+        Path segmentFile = queuePath.resolve(String.format("%s.log", filename));
+        try {
+            if (Files.exists(segmentFile)) {
+                Files.delete(file);
+            }
+            else {
+                if (RecordIOReader.validNonEmptySegment(file)) {
+                    Files.move(file, segmentFile, StandardCopyOption.ATOMIC_MOVE);
+                }
+            }
+        } catch (IOException e){
+            logger.error("Unable to clean up temp files", e);
+            throw new RuntimeException("Unable to clean up temp files", e);
+        }
+    }
+
 }

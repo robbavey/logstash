@@ -66,9 +66,12 @@ module LogStash; class JavaBasePipeline
 
   def dlq_writer
     if settings.get_value("dead_letter_queue.enable")
-      @dlq_writer = DeadLetterQueueFactory.getWriter(pipeline_id, settings.get_value("path.dead_letter_queue"), settings.get_value("dead_letter_queue.max_bytes"))
+      DeadLetterQueueFactory.getWriter(pipeline_id,
+                                       settings.get_value("path.dead_letter_queue"),
+                                       settings.get_value("dead_letter_queue.max_bytes"),
+                                       Duration.of_nanos(settings.get_value("dead_letter_queue.flush_interval")).to_millis)
     else
-      @dlq_writer = LogStash::Util::DummyDeadLetterQueueWriter.new
+      LogStash::Util::DummyDeadLetterQueueWriter.new
     end
   end
 

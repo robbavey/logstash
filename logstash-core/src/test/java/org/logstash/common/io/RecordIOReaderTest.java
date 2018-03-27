@@ -11,6 +11,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.OptionalInt;
 import java.util.function.Function;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -149,6 +150,36 @@ public class RecordIOReaderTest {
                 assertThat(toChar.apply(reader.readEvent()), equalTo(i));
             }
         }
+    }
+
+    @Test
+    public void testUnwrittenSegment() throws Exception {
+        assertThat(RecordIOReader.validNonEmptySegment(file), is(false));
+    }
+
+    @Test
+    public void testPartiallyWrittenSegment() throws Exception {
+        try(RecordIOWriter writer = new RecordIOWriter(file)) {
+            writer.writeRecordHeader(
+                    new RecordHeader(RecordType.COMPLETE, 100, OptionalInt.empty(), 0));
+        }
+        assertThat(RecordIOReader.validNonEmptySegment(file), is(false));
+    }
+
+    @Test
+    public void testEmptySegment() throws Exception {
+        try(RecordIOWriter writer = new RecordIOWriter(file)){
+            // Do nothing. Creating a new writer is the same behaviour as starting and closing
+        }
+        assertThat(RecordIOReader.validNonEmptySegment(file), is(false));
+    }
+
+    @Test
+    public void testValidSegment() throws Exception {
+        try(RecordIOWriter writer = new RecordIOWriter(file)){
+            writer.writeEvent(new byte[]{ 72, 101, 108, 108, 111});
+        }
+        assertThat(RecordIOReader.validNonEmptySegment(file), is(true));
     }
 
     @Test
