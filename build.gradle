@@ -6,6 +6,7 @@ buildscript {
         }
     }
     dependencies {
+        classpath 'org.yaml:snakeyaml:1.17'
         classpath "gradle.plugin.com.github.jk1:gradle-license-report:0.7.1"
     }
 }
@@ -17,7 +18,7 @@ plugins {
 apply plugin: 'de.undercouch.download'
 apply from: "rubyUtils.gradle"
 
-
+import org.yaml.snakeyaml.Yaml
 import de.undercouch.gradle.tasks.download.Download
 import groovy.json.JsonSlurper
 
@@ -413,6 +414,64 @@ task copyEs(type: Copy, dependsOn: [downloadEs, deleteLocalEs]) {
         System.out.println "Unzipped ${project.ext.elasticsearchDownloadLocation} to ./build/elasticsearch"
     }
 }
+
+
+task downloadJdk(type: Download) {
+    description "Download JDK 13"
+
+    project.ext.set("versionFound", true)
+    String osName = System.properties['os.name']
+
+    // TODO: Windows
+    if (osName ==~ /Mac OS X/) {
+        osName = "mac"
+    } else {
+        osName = "linux"
+    }
+
+    def versionYml = new Yaml().load(new File("$projectDir/versions.yml").text)
+    String revision = versionYml.bundled_jdk.revision
+    String build = versionYml.bundled_jdk.build
+    String major = revision.split('\\.').first()
+
+    String unpackedJdkName = "jdk-${major}"
+    project.ext.set("unpackedJdkName", unpackedJdkName)
+    String extension = 'tar.gz'
+
+    // find url of build artifact
+    String artifactApiUrl = "https://artifactory.elstc.co/artifactory/oss-jdk-local/adoptopenjdk/OpenJDK${major}U-jdk_x64_${osName}_hotspot_${revision}_${build}.${extension}"
+
+    project.ext.set("jdkURL", System.getenv("JDK_URL") ?: artifactApiUrl)
+    project.ext.set("jdkDownloadLocation", "${projectDir}/build/${unpackedJdkName}.tar.gz")
+    project.ext.set("jdkDirectory",  "${projectDir}/build/${unpackedJdkName}")
+    project.ext.set("buildDirectory",  "${projectDir}/build")
+
+    src project.ext.jdkURL
+    onlyIfNewer true
+    inputs.file("${projectDir}/versions.yml")
+    outputs.file(project.ext.jdkDownloadLocation)
+    dest new File(project.ext.jdkDownloadLocation)
+
+    doLast {
+        // TODO: jdk.app for darwin
+        mkdir "${projectDir}/jdk"
+        System.out.println "Downloaded to ${project.ext.jdkDownloadLocation}"
+    }
+}
+
+task deleteLocalJdk(type: Delete) {
+    delete ("${projectDir}/jdk")
+}
+
+// Cannot use tarTree as it does not handle symlinks
+task unzipJdk(type: Exec) {
+    commandLine 'tar', 'xvf', project.ext.jdkDownloadLocation, '-C', "${projectDir}/jdk", '--strip-components', '1'
+}
+
+task copyJdk(type: Copy, dependsOn: [downloadJdk, unzipJdk]) {
+    System.out.println "Download location is ${project.ext.jdkDownloadLocation}, Unzipping ${project.ext.jdkDirectory} to \"${projectDir}/jdk\""
+}
+
 
 Boolean oss = System.getenv('OSS').equals('true')
 

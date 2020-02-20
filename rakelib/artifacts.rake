@@ -45,6 +45,7 @@ namespace "artifact" do
       "Gemfile",
       "Gemfile.lock",
       "x-pack/**/*",
+      "jdk/**/*",
     ]
   end
 
@@ -107,7 +108,7 @@ namespace "artifact" do
   task "all" => ["prepare", "build"]
 
   desc "Build a tar.gz of default logstash plugins with all dependencies"
-  task "tar" => ["prepare", "generate_build_metadata"] do
+  task "tar" => ["prepare", "jdk", "generate_build_metadata"] do
     puts("[artifact:tar] Building tar.gz of default plugins")
     build_tar('ELASTIC-LICENSE')
   end
@@ -280,6 +281,12 @@ namespace "artifact" do
     end
   end
 
+  task "jdk" do |task, args|
+    system('./gradlew copyJdk')
+    #unless File.exists?(File.join("vendor", "jruby"))
+  end # jruby
+
+
   def ensure_logstash_version_constant_defined
     # we do not want this file required when rake (ruby) parses this file
     # only when there is a task executing, not at the very top of this file
@@ -288,9 +295,46 @@ namespace "artifact" do
     end
   end
 
+
+  #def build_tar(license, tar_suffix = nil, excluder=nil)
+  #  require "zlib"
+  #  require "archive/tar/minitar"
+  #  ensure_logstash_version_constant_defined
+  #  tarpath = "build/logstash#{tar_suffix}-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}.tar.gz"
+  #  if File.exist?(tarpath) && ENV['SKIP_PREPARE'] == "1" && !source_modified_since?(File.mtime(tarpath))
+  #    puts("[artifact:tar] Source code not modified. Skipping build of #{tarpath}")
+  #    return
+  #  end
+  #  puts("[artifact:tar] building #{tarpath}")
+  #  gz = Zlib::GzipWriter.new(File.new(tarpath, "wb"), Zlib::BEST_COMPRESSION)
+  #  tar = Archive::Tar::Minitar::Output.new(gz)
+  #  files(excluder).each do |path|
+  #    write_to_tar(tar, path, "logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}/#{path}")
+  #  end
+  #
+  #  source_license_path = "licenses/#{license}.txt"
+  #  fail("Missing source license: #{source_license_path}") unless File.exists?(source_license_path)
+  #  write_to_tar(tar, source_license_path, "logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}/LICENSE.txt")
+  #
+  #  # add build.rb to tar
+  #  metadata_file_path_in_tar = File.join("logstash-core", "lib", "logstash", "build.rb")
+  #  path_in_tar = File.join("logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}", metadata_file_path_in_tar)
+  #  write_to_tar(tar, BUILD_METADATA_FILE.path, path_in_tar)
+  #
+  #  tar.close
+  #  gz.close
+  #
+  #
+  #  append_jdk(tarpath)
+  #
+  #  puts "Complete: #{tarpath}"
+  #end
+
+
   def build_tar(license, tar_suffix = nil, excluder=nil)
     require "zlib"
-    require "archive/tar/minitar"
+    require 'rubygems'
+    require 'rubygems/package'
     ensure_logstash_version_constant_defined
     tarpath = "build/logstash#{tar_suffix}-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}.tar.gz"
     if File.exist?(tarpath) && ENV['SKIP_PREPARE'] == "1" && !source_modified_since?(File.mtime(tarpath))
@@ -299,36 +343,32 @@ namespace "artifact" do
     end
     puts("[artifact:tar] building #{tarpath}")
     gz = Zlib::GzipWriter.new(File.new(tarpath, "wb"), Zlib::BEST_COMPRESSION)
-    tar = Archive::Tar::Minitar::Output.new(gz)
-    files(excluder).each do |path|
-      write_to_tar(tar, path, "logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}/#{path}")
+    Gem::Package::TarWriter.new(gz) do |tar|
+      files(excluder).each do |path|
+        write_to_tar(tar, path, "logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}/#{path}")
+      end
+
+      source_license_path = "licenses/#{license}.txt"
+      fail("Missing source license: #{source_license_path}") unless File.exists?(source_license_path)
+      write_to_tar(tar, source_license_path, "logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}/LICENSE.txt")
+
+      # add build.rb to tar
+      metadata_file_path_in_tar = File.join("logstash-core", "lib", "logstash", "build.rb")
+      path_in_tar = File.join("logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}", metadata_file_path_in_tar)
+      write_to_tar(tar, BUILD_METADATA_FILE.path, path_in_tar)
     end
-
-    source_license_path = "licenses/#{license}.txt"
-    fail("Missing source license: #{source_license_path}") unless File.exists?(source_license_path)
-    write_to_tar(tar, source_license_path, "logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}/LICENSE.txt")
-
-    # add build.rb to tar
-    metadata_file_path_in_tar = File.join("logstash-core", "lib", "logstash", "build.rb")
-    path_in_tar = File.join("logstash-#{LOGSTASH_VERSION}#{PACKAGE_SUFFIX}", metadata_file_path_in_tar)
-    write_to_tar(tar, BUILD_METADATA_FILE.path, path_in_tar)
-
-    tar.close
     gz.close
-    puts "Complete: #{tarpath}"
   end
+
 
   def write_to_tar(tar, path, path_in_tar)
     stat = File.lstat(path)
-    opts = {
-      :size => stat.size,
-      :mode => stat.mode,
-      :mtime => stat.mtime
-    }
     if stat.directory?
-      tar.tar.mkdir(path_in_tar, opts)
+      tar.mkdir(path_in_tar, stat.mode)
+    elsif stat.symlink?
+      tar.add_symlink(path_in_tar, File.readlink(path), stat.mode)
     else
-      tar.tar.add_file_simple(path_in_tar, opts) do |io|
+      tar.add_file_simple(path_in_tar, stat.mode, stat.size) do |io|
         File.open(path,'rb') do |fd|
           chunk = nil
           size = 0
