@@ -55,8 +55,12 @@ public class ProcessMonitor {
                     unixOsBean.getProcessCpuTime(), TimeUnit.NANOSECONDS
                 );
                 this.cpuProcessPercent = scaleLoadToPercent(unixOsBean.getProcessCpuLoad());
-                this.cpuSystemPercent = scaleLoadToPercent(unixOsBean.getSystemCpuLoad());
-
+                this.cpuSystemPercent = 0;
+//                try{
+//                    this.cpuSystemPercent =  Class.forName("com.sun.management.OperatingSystemMXBean").getMethod("getSystemCpuLoad");
+//                } catch (Exception e){
+//                    this.cpuSystemPercent = null;
+//                }
                 this.memTotalVirtualInBytes = unixOsBean.getCommittedVirtualMemorySize();
             }
         }
