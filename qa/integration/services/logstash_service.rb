@@ -58,7 +58,7 @@ class LogstashService < Service
       ls_version_file = YAML.load_file(LS_VERSION_FILE)
       ls_file = "logstash-" + ls_version_file["logstash"]
       # First try without the snapshot if it's there
-      @logstash_home = File.expand_path(File.join(LS_BUILD_DIR, ls_file), __FILE__)
+      @logstash_home = Shellwords.escape(File.expand_path(File.join(LS_BUILD_DIR, ls_file), __FILE__))
       @logstash_home += "-SNAPSHOT" unless Dir.exist?(@logstash_home)
 
       puts "Using #{@logstash_home} as LS_HOME"
@@ -95,7 +95,7 @@ class LogstashService < Service
   # Given an input this pipes it to LS. Expects a stdin input in LS
   def start_with_input(config, input)
     Bundler.with_clean_env do
-      `cat #{input} | #{@logstash_bin} -e \'#{config}\'`
+      `cat #{Shellwords.escape(input)} | #{@logstash_bin} -e \'#{config}\'`
     end
   end
 
