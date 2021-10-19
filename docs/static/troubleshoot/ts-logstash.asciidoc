@@ -67,8 +67,7 @@ Try adding these values to the `jvm.options` file.
 
 *Notes:*
 
-* These settings allow Logstash to start without warnings in Java 11, but they
-prevent Logstash from starting on Java 8.
+* These settings allow Logstash to start without warnings in Java 11
 * This workaround has been tested with simple pipelines. If you have experiences
 to share, please comment in the
 https://github.com/elastic/logstash/issues/10496[issue].
