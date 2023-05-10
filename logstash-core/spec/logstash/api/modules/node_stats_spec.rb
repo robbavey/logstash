@@ -22,141 +22,264 @@ require "logstash/api/modules/node_stats"
 
 describe LogStash::Api::Modules::NodeStats do
   # enable PQ to ensure PQ-related metrics are present
-  include_context "api setup", {"queue.type" => "persisted"}
-  include_examples "not found"
-
   extend ResourceDSLMethods
 
-  # DSL describing response structure
-  root_structure = {
-    "jvm"=>{
-      "uptime_in_millis" => Numeric,
-      "threads"=>{
-        "count"=>Numeric,
-        "peak_count"=>Numeric
-      },
-      "gc" => {
-        "collectors" => {
-          "young" => {
-            "collection_count" => Numeric,
-            "collection_time_in_millis" => Numeric
-          },
-          "old" => {
-            "collection_count" => Numeric,
-            "collection_time_in_millis" => Numeric
-          }
-        }
-      },
-      "mem" => {
-        "heap_used_in_bytes" => Numeric,
-        "heap_used_percent" => Numeric,
-        "heap_committed_in_bytes" => Numeric,
-        "heap_max_in_bytes" => Numeric,
-        "non_heap_used_in_bytes" => Numeric,
-        "non_heap_committed_in_bytes" => Numeric,
-        "pools" => {
-          "survivor" => {
-            "peak_used_in_bytes" => Numeric,
-            "used_in_bytes" => Numeric,
-            "peak_max_in_bytes" => Numeric,
-            "max_in_bytes" => Numeric
-          },
-          "old" => {
-            "peak_used_in_bytes" => Numeric,
-            "used_in_bytes" => Numeric,
-            "peak_max_in_bytes" => Numeric,
-            "max_in_bytes" => Numeric
-          },
-          "young" => {
-            "peak_used_in_bytes" => Numeric,
-            "used_in_bytes" => Numeric,
-            "peak_max_in_bytes" => Numeric,
-            "max_in_bytes" => Numeric
-          }
-        }
-      }
-    },
-    "process"=>{
-      "peak_open_file_descriptors"=>Numeric,
-      "max_file_descriptors"=>Numeric,
-      "open_file_descriptors"=>Numeric,
-      "mem"=>{
-        "total_virtual_in_bytes"=>Numeric
-      },
-      "cpu"=>{
-        "total_in_millis"=>Numeric,
-        "percent"=>Numeric,
-        # load_average is not supported on Windows, set it below
-      }
-   },
-   "events" => {
-      "duration_in_millis" => Numeric,
-      "in" => Numeric,
-      "filtered" => Numeric,
-      "out" => Numeric,
-      "queue_push_duration_in_millis" => Numeric
-   },
-   "flow" => {
-      "output_throughput" => Hash,
-      "filter_throughput" => Hash,
-      "queue_backpressure" => Hash,
-      "worker_concurrency" => Hash,
-      "input_throughput" => Hash
-   },
-   "pipelines" => {
-     "main" => {
-       "events" => {
-         "duration_in_millis" => Numeric,
-         "in" => Numeric,
-         "filtered" => Numeric,
-         "out" => Numeric,
-         "queue_push_duration_in_millis" => Numeric
-       },
-       "flow" => {
-         "output_throughput" => Hash,
-         "filter_throughput" => Hash,
-         "queue_backpressure" => Hash,
-         "worker_concurrency" => Hash,
-         "input_throughput" => Hash,
-         "queue_persisted_growth_bytes" => Hash,
-         "queue_persisted_growth_events" => Hash
-       },
-       "plugins" => {
-          "inputs" => Array,
-          "codecs" => Array,
-          "filters" => Array,
-          "outputs" => Array,
-       },
-       "queue" => {
-         "capacity" => {
-           "page_capacity_in_bytes" => Numeric,
-           "max_queue_size_in_bytes" => Numeric,
-           "queue_size_in_bytes" => Numeric,
-           "max_unread_events" => Numeric
-         },
-         "events" => Numeric,
-         "type" => String,
-         "data" => {
-           "storage_type" => String,
-           "path" => String,
-           "free_space_in_bytes" => Numeric
-         }
-       }
-     }
-   },
-   "reloads" => {
-     "successes" => Numeric,
-     "failures" => Numeric
-   },
-   "os" => Hash,
-   "queue" => {
-      "events_count" => Numeric
-   }
-  }
-
-  unless LogStash::Environment.windows?
-    root_structure["process"]["cpu"]["load_average"] = { "1m" => Numeric }
+  shared_examples "a node stats endpoint" do |expected_payload|
+    include_examples "not found"
+    context "presents the expected response" do
+      unless LogStash::Environment.windows?
+        expected_payload["process"]["cpu"]["load_average"] = { "1m" => Numeric }
+      end
+      test_api_and_resources(expected_payload)
+    end
   end
 
-  test_api_and_resources(root_structure)
+  context 'with persisted queue' do
+    include_context "api setup", {"queue.type" => "persisted"}
+
+    payload = {
+            "jvm"=>{
+                "uptime_in_millis" => Numeric,
+                "threads"=>{
+                    "count"=>Numeric,
+                    "peak_count"=>Numeric
+                },
+                "gc" => {
+                    "collectors" => {
+                        "young" => {
+                            "collection_count" => Numeric,
+                            "collection_time_in_millis" => Numeric
+                        },
+                        "old" => {
+                            "collection_count" => Numeric,
+                            "collection_time_in_millis" => Numeric
+                        }
+                    }
+                },
+                "mem" => {
+                    "heap_used_in_bytes" => Numeric,
+                    "heap_used_percent" => Numeric,
+                    "heap_committed_in_bytes" => Numeric,
+                    "heap_max_in_bytes" => Numeric,
+                    "non_heap_used_in_bytes" => Numeric,
+                    "non_heap_committed_in_bytes" => Numeric,
+                    "pools" => {
+                        "survivor" => {
+                            "peak_used_in_bytes" => Numeric,
+                            "used_in_bytes" => Numeric,
+                            "peak_max_in_bytes" => Numeric,
+                            "max_in_bytes" => Numeric
+                        },
+                        "old" => {
+                            "peak_used_in_bytes" => Numeric,
+                            "used_in_bytes" => Numeric,
+                            "peak_max_in_bytes" => Numeric,
+                            "max_in_bytes" => Numeric
+                        },
+                        "young" => {
+                            "peak_used_in_bytes" => Numeric,
+                            "used_in_bytes" => Numeric,
+                            "peak_max_in_bytes" => Numeric,
+                            "max_in_bytes" => Numeric
+                        }
+                    }
+                }
+            },
+            "process"=>{
+                "peak_open_file_descriptors"=>Numeric,
+                "max_file_descriptors"=>Numeric,
+                "open_file_descriptors"=>Numeric,
+                "mem"=>{
+                    "total_virtual_in_bytes"=>Numeric
+                },
+                "cpu"=>{
+                    "total_in_millis"=>Numeric,
+                    "percent"=>Numeric,
+                    # load_average is not supported on Windows, set it below
+                }
+            },
+            "events" => {
+                "duration_in_millis" => Numeric,
+                "in" => Numeric,
+                "filtered" => Numeric,
+                "out" => Numeric,
+                "queue_push_duration_in_millis" => Numeric
+            },
+            "flow" => {
+                "output_throughput" => Hash,
+                "filter_throughput" => Hash,
+                "queue_backpressure" => Hash,
+                "worker_concurrency" => Hash,
+                "input_throughput" => Hash
+            },
+            "pipelines" => {
+                "main" => {
+                    "events" => {
+                        "duration_in_millis" => Numeric,
+                        "in" => Numeric,
+                        "filtered" => Numeric,
+                        "out" => Numeric,
+                        "queue_push_duration_in_millis" => Numeric
+                    },
+                    "flow" => {
+                        "output_throughput" => Hash,
+                        "filter_throughput" => Hash,
+                        "queue_backpressure" => Hash,
+                        "worker_concurrency" => Hash,
+                        "input_throughput" => Hash,
+                        "queue_persisted_growth_bytes" => Hash,
+                        "queue_persisted_growth_events" => Hash
+                    },
+                    "plugins" => {
+                        "inputs" => Array,
+                        "codecs" => Array,
+                        "filters" => Array,
+                        "outputs" => Array,
+                    },
+                    "queue" => {
+                        "capacity" => {
+                            "page_capacity_in_bytes" => Numeric,
+                            "max_queue_size_in_bytes" => Numeric,
+                            "queue_size_in_bytes" => Numeric,
+                            "max_unread_events" => Numeric
+                        },
+                        "events" => Numeric,
+                        "type" => String,
+                        "data" => {
+                            "storage_type" => String,
+                            "path" => String,
+                            "free_space_in_bytes" => Numeric
+                        }
+                    }
+                }
+            },
+            "reloads" => {
+                "successes" => Numeric,
+                "failures" => Numeric
+            },
+            "os" => Hash,
+            "queue" => {
+                "events_count" => Numeric
+            }
+        }
+    it_behaves_like "a node stats endpoint", payload
+  end
+
+  context 'with no pq' do
+    include_context "api setup"
+
+    payload = {
+        "jvm"=>{
+            "uptime_in_millis" => Numeric,
+            "threads"=>{
+                "count"=>Numeric,
+                "peak_count"=>Numeric
+            },
+            "gc" => {
+                "collectors" => {
+                    "young" => {
+                        "collection_count" => Numeric,
+                        "collection_time_in_millis" => Numeric
+                    },
+                    "old" => {
+                        "collection_count" => Numeric,
+                        "collection_time_in_millis" => Numeric
+                    }
+                }
+            },
+            "mem" => {
+                "heap_used_in_bytes" => Numeric,
+                "heap_used_percent" => Numeric,
+                "heap_committed_in_bytes" => Numeric,
+                "heap_max_in_bytes" => Numeric,
+                "non_heap_used_in_bytes" => Numeric,
+                "non_heap_committed_in_bytes" => Numeric,
+                "pools" => {
+                    "survivor" => {
+                        "peak_used_in_bytes" => Numeric,
+                        "used_in_bytes" => Numeric,
+                        "peak_max_in_bytes" => Numeric,
+                        "max_in_bytes" => Numeric
+                    },
+                    "old" => {
+                        "peak_used_in_bytes" => Numeric,
+                        "used_in_bytes" => Numeric,
+                        "peak_max_in_bytes" => Numeric,
+                        "max_in_bytes" => Numeric
+                    },
+                    "young" => {
+                        "peak_used_in_bytes" => Numeric,
+                        "used_in_bytes" => Numeric,
+                        "peak_max_in_bytes" => Numeric,
+                        "max_in_bytes" => Numeric
+                    }
+                }
+            }
+        },
+        "process"=>{
+            "peak_open_file_descriptors"=>Numeric,
+            "max_file_descriptors"=>Numeric,
+            "open_file_descriptors"=>Numeric,
+            "mem"=>{
+                "total_virtual_in_bytes"=>Numeric
+            },
+            "cpu"=>{
+                "total_in_millis"=>Numeric,
+                "percent"=>Numeric,
+                # load_average is not supported on Windows, set it below
+            }
+        },
+        "events" => {
+            "duration_in_millis" => Numeric,
+            "in" => Numeric,
+            "filtered" => Numeric,
+            "out" => Numeric,
+            "queue_push_duration_in_millis" => Numeric
+        },
+        "flow" => {
+            "output_throughput" => Hash,
+            "filter_throughput" => Hash,
+            "queue_backpressure" => Hash,
+            "worker_concurrency" => Hash,
+            "input_throughput" => Hash
+        },
+        "pipelines" => {
+            "main" => {
+                "events" => {
+                    "duration_in_millis" => Numeric,
+                    "in" => Numeric,
+                    "filtered" => Numeric,
+                    "out" => Numeric,
+                    "queue_push_duration_in_millis" => Numeric
+                },
+                "flow" => {
+                    "output_throughput" => Hash,
+                    "filter_throughput" => Hash,
+                    "queue_backpressure" => Hash,
+                    "worker_concurrency" => Hash,
+                    "input_throughput" => Hash
+                },
+                "plugins" => {
+                    "inputs" => Array,
+                    "codecs" => Array,
+                    "filters" => Array,
+                    "outputs" => Array,
+                },
+                "queue" => {
+                    "events_count" => Numeric,
+                    "type" => String,
+                }
+            }
+        },
+        "reloads" => {
+            "successes" => Numeric,
+            "failures" => Numeric
+        },
+        "os" => Hash,
+        "queue" => {
+            "events_count" => Numeric
+        }
+    }
+    it_behaves_like "a node stats endpoint", payload
+  end
 end

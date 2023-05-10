@@ -79,6 +79,7 @@ import org.logstash.config.ir.compiler.AbstractOutputDelegatorExt;
 import org.logstash.execution.queue.QueueWriter;
 import org.logstash.ext.JRubyAbstractQueueWriteClientExt;
 import org.logstash.ext.JRubyWrappedWriteClientExt;
+import org.logstash.ext.JrubyWrappedSynchronousQueueExt;
 import org.logstash.instrument.metrics.AbstractMetricExt;
 import org.logstash.instrument.metrics.AbstractNamespacedMetricExt;
 import org.logstash.instrument.metrics.FlowMetric;
@@ -495,6 +496,10 @@ public class AbstractPipelineExt extends RubyBasicObject {
             dataMetrics.gauge(context, PATH_KEY, dirPath);
 
             pipelineMetric.gauge(context, EVENTS_KEY, inner.ruby_unread_count(context));
+        }else if (queue instanceof JrubyWrappedSynchronousQueueExt) {
+            final JrubyWrappedSynchronousQueueExt inner = ((JrubyWrappedSynchronousQueueExt) queue);
+            // Use events_count to avoid duplication in queue metrics payload
+            pipelineMetric.gauge(context, EVENTS_COUNT_KEY, inner.ruby_queue_length(context));
         }
         return context.nil;
     }

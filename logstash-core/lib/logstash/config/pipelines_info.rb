@@ -138,24 +138,28 @@ module LogStash; module Config;
     end
 
     def self.format_queue_stats(pipeline_id, metric_store)
-      path = [:stats, :pipelines, pipeline_id, :queue, :type]
-      if metric_store.has_metric?(*path)
-        queue_type = metric_store.get_shallow(*path).value
-      else
-        queue_type = 'memory'
-      end
-
       events = 0
       queue_size_in_bytes = 0
       max_queue_size_in_bytes = 0
 
-      if queue_type == "persisted"
+      path = [:stats, :pipelines, pipeline_id, :queue, :type]
+      if metric_store.has_metric?(*path)
+        queue_type = metric_store.get_shallow(*path).value
         queue_path = [:stats, :pipelines, pipeline_id, :queue]
-        events = metric_store.get_shallow(*queue_path, :events).value
-        queue_size_in_bytes = metric_store.get_shallow(*queue_path, :capacity, :queue_size_in_bytes).value
-        max_queue_size_in_bytes = metric_store.get_shallow(*queue_path, :capacity, :max_queue_size_in_bytes).value
-      end
 
+        events = if metric_store.has_metric?(*queue_path, :events)
+          metric_store.get_shallow(*queue_path, :events).value
+        elsif metric_store.has_metric?(*queue_path, :events_count)
+          metric_store.get_shallow(*queue_path, :events_count).value
+        end
+
+        if queue_type == "persisted"
+          queue_size_in_bytes = metric_store.get_shallow(*queue_path, :capacity, :queue_size_in_bytes).value
+          max_queue_size_in_bytes = metric_store.get_shallow(*queue_path, :capacity, :max_queue_size_in_bytes).value
+        end
+      else
+        queue_type = 'memory'
+      end
       {
           :type => queue_type,
           :events_count => events,

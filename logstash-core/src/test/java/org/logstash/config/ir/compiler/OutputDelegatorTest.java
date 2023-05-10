@@ -39,6 +39,7 @@ import static org.junit.Assert.assertEquals;
 import static org.logstash.RubyUtil.RUBY;
 import static org.logstash.RubyUtil.RUBY_OUTPUT_DELEGATOR_CLASS;
 import static org.logstash.instrument.metrics.MetricKeys.EVENTS_KEY;
+import static org.logstash.instrument.metrics.MetricKeys.EVENTS_COUNT_KEY;
 
 @SuppressWarnings("rawtypes")
 @NotThreadSafe

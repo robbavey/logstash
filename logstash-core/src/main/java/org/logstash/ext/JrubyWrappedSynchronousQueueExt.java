@@ -55,6 +55,11 @@ public final class JrubyWrappedSynchronousQueueExt extends AbstractWrappedQueueE
         return this;
     }
 
+    @JRubyMethod(name = "queue_length")
+    public IRubyObject ruby_queue_length(ThreadContext context) {
+        return context.runtime.newFixnum(queue.size());
+    }
+
     @Override
     protected JRubyAbstractQueueWriteClientExt getWriteClient(final ThreadContext context) {
         return JrubyMemoryWriteClientExt.create(queue);
