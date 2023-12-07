@@ -125,7 +125,7 @@ public abstract class AbstractFilterDelegatorExt extends RubyObject {
         return id;
     }
 
-    @JRubyMethod(name = "multi_filter")
+    @JRubyMethod(name = FilterDelegatorExt.FILTER_METHOD_NAME)
     @SuppressWarnings({"unchecked", "rawtypes"})
     public RubyArray multiFilter(final IRubyObject input) {
         RubyArray batch = (RubyArray) input;

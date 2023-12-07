@@ -20,6 +20,8 @@
 
 package org.logstash;
 
+import co.elastic.apm.attach.ElasticApmAttacher;
+
 import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,6 +60,7 @@ public final class Logstash implements Runnable, AutoCloseable {
      * @param args Logstash CLI Arguments
      */
     public static void main(final String... args) {
+        ElasticApmAttacher.attach();
         final String lsHome = System.getenv("LS_HOME");
         if (lsHome == null) {
             throw new IllegalStateException(

@@ -44,7 +44,7 @@ public abstract class AbstractOutputDelegatorExt extends RubyObject {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String OUTPUT_METHOD_NAME = "multi_receive";
+    public static final String OUTPUT_METHOD_NAME = "multi_receive_with_apm";
 
     private AbstractMetricExt metric;
 

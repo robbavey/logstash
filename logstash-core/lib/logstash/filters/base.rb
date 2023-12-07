@@ -17,11 +17,13 @@
 
 require "logstash/plugin"
 require "logstash/config/mixin"
+require "logstash/util/apm"
 require "logstash/util/decorators"
 
 class LogStash::Filters::Base < LogStash::Plugin
   include LogStash::Util::Loggable
   include LogStash::Config::Mixin
+  include LogStash::Util::Apm
 
   config_name "filter"
 
@@ -177,6 +179,13 @@ class LogStash::Filters::Base < LogStash::Plugin
       end
     end
     result
+  end
+
+  public
+  def multi_filter_with_apm(events)
+    with_span("filter #{config_name}:#{id}", events) do
+      multi_filter(events)
+    end
   end
 
   public
