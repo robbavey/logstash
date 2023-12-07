@@ -596,7 +596,8 @@ module LogStash; class JavaPipeline < AbstractPipeline
         @shutdownRequested,    # AtomicBoolean
         # behaviour config pass-through
         @drain_queue,          # boolean
-        @preserve_event_order) # boolean
+        @preserve_event_order, # boolean
+        pipeline_id) # string
     rescue => e
       @logger.error(
         "Worker loop initialization error",

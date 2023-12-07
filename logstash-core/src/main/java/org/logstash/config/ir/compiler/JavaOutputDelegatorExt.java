@@ -20,6 +20,10 @@
 
 package org.logstash.config.ir.compiler;
 
+import co.elastic.apm.api.ElasticApm;
+import co.elastic.apm.api.Scope;
+import co.elastic.apm.api.Span;
+
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
@@ -38,6 +42,7 @@ import co.elastic.logstash.api.Output;
 import org.logstash.ext.JrubyEventExtLibrary;
 import org.logstash.instrument.metrics.AbstractMetricExt;
 
+@SuppressWarnings("try")
 @JRubyClass(name = "JavaOutputDelegator")
 public final class JavaOutputDelegatorExt extends AbstractOutputDelegatorExt {
 
@@ -89,7 +94,14 @@ public final class JavaOutputDelegatorExt extends AbstractOutputDelegatorExt {
 
     void outputRubyEvents(Collection<JrubyEventExtLibrary.RubyEvent> e) {
         List<Event> events = e.stream().map(JrubyEventExtLibrary.RubyEvent::getEvent).collect(Collectors.toList());
-        output.output(events);
+        Span parent = ElasticApm.currentSpan();
+        Span span = parent.startSpan();
+        span.setName(String.format("output %s:%s", this.configName, this.getId().asJavaString()));
+        try (Scope scope = span.activate()){
+            output.output(events);
+        } finally {
+            span.end();
+        }
     }
 
     void outputClose() {

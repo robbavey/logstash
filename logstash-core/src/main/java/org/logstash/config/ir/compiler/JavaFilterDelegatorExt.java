@@ -20,6 +20,10 @@
 
 package org.logstash.config.ir.compiler;
 
+import co.elastic.apm.api.ElasticApm;
+import co.elastic.apm.api.Scope;
+import co.elastic.apm.api.Span;
+
 import co.elastic.logstash.api.Event;
 import co.elastic.logstash.api.Filter;
 import co.elastic.logstash.api.FilterMatchListener;
@@ -43,6 +47,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+@SuppressWarnings("try")
 @JRubyClass(name = "JavaFilterDelegator")
 public class JavaFilterDelegatorExt extends AbstractFilterDelegatorExt {
 
@@ -75,15 +80,23 @@ public class JavaFilterDelegatorExt extends AbstractFilterDelegatorExt {
     @SuppressWarnings({"unchecked","rawtypes"})
     @Override
     protected RubyArray doMultiFilter(final RubyArray batch) {
-        List<Event> inputEvents = (List<Event>) batch.stream()
-                .map(x -> ((JrubyEventExtLibrary.RubyEvent) x).getEvent())
-                .collect(Collectors.toList());
-        Collection<Event> outputEvents = filter.filter(inputEvents, filterMatchListener);
-        RubyArray newBatch = RubyArray.newArray(RubyUtil.RUBY, outputEvents.size());
-        for (Event outputEvent : outputEvents) {
-            newBatch.add(JrubyEventExtLibrary.RubyEvent.newRubyEvent(RubyUtil.RUBY, (org.logstash.Event)outputEvent));
+        Span parent = ElasticApm.currentSpan();
+        Span span = parent.startSpan();
+        span.setName(String.format("filter %s:%s", this.configName, this.getId().asJavaString()));
+        try (Scope scope = span.activate()){
+            List<Event> inputEvents = (List<Event>) batch.stream()
+                    .map(x -> ((JrubyEventExtLibrary.RubyEvent) x).getEvent())
+                    .collect(Collectors.toList());
+            Collection<Event> outputEvents = filter.filter(inputEvents, filterMatchListener);
+            RubyArray newBatch = RubyArray.newArray(RubyUtil.RUBY, outputEvents.size());
+            for (Event outputEvent : outputEvents) {
+                newBatch.add(JrubyEventExtLibrary.RubyEvent.newRubyEvent(RubyUtil.RUBY, (org.logstash.Event)outputEvent));
+            }
+            return newBatch;
+        } finally {
+            span.end();
         }
-        return newBatch;
+
     }
 
     @Override

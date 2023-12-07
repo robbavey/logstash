@@ -17,11 +17,13 @@
 
 require "logstash/plugin"
 require "logstash/config/mixin"
+require "logstash/util/apm"
 require "concurrent/atomic/atomic_fixnum"
 
 class LogStash::Outputs::Base < LogStash::Plugin
   include LogStash::Util::Loggable
   include LogStash::Config::Mixin
+  include LogStash::Util::Apm
 
   config_name "output"
 
@@ -94,6 +96,13 @@ class LogStash::Outputs::Base < LogStash::Plugin
   def receive(event)
     raise "#{self.class}#receive must be overidden"
   end # def receive
+
+  public
+  def multi_receive_with_apm(events)
+    with_span("output #{config_name}:#{id}", events) do
+      multi_receive(events)
+    end
+  end
 
   public
   # To be overridden in implementations

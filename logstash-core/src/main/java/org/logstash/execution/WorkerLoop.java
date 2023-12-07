@@ -22,10 +22,14 @@ package org.logstash.execution;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
 
+import co.elastic.apm.api.ElasticApm;
+import co.elastic.apm.api.Scope;
+import co.elastic.apm.api.Transaction;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.logstash.config.ir.CompiledPipeline;
 
+@SuppressWarnings("try")
 /**
  * Pipeline execution worker, it's responsible to execute filters and output plugins for each {@link QueueBatch} that
  * pull out from queue.
@@ -50,6 +54,8 @@ public final class WorkerLoop implements Runnable {
 
     private final boolean drainQueue;
 
+    private final String pipelineId;
+
     public WorkerLoop(
             final QueueReadClient readClient,
             final CompiledPipeline compiledPipeline,
@@ -60,7 +66,8 @@ public final class WorkerLoop implements Runnable {
             final AtomicBoolean flushing,
             final AtomicBoolean shutdownRequested,
             final boolean drainQueue,
-            final boolean preserveEventOrder)
+            final boolean preserveEventOrder,
+            final String pipelineId)
     {
         this.execution = workerObserver.ofExecution(compiledPipeline.buildExecution(preserveEventOrder));
         this.readClient = readClient;
@@ -70,6 +77,7 @@ public final class WorkerLoop implements Runnable {
         this.flushRequested = flushRequested;
         this.flushing = flushing;
         this.shutdownRequested = shutdownRequested;
+        this.pipelineId = pipelineId;
     }
 
     @Override
@@ -109,15 +117,35 @@ public final class WorkerLoop implements Runnable {
 
     private boolean abortableCompute(QueueBatch batch, boolean flush, boolean shutdown) {
         boolean isNackBatch = false;
-        try {
-            execution.compute(batch, flush, shutdown);
-        } catch (Exception ex) {
-            if (ex instanceof AbortedBatchException) {
-                isNackBatch = true;
-                LOGGER.info("Received signal to abort processing current batch. Terminating pipeline worker {}", Thread.currentThread().getName());
-            } else {
-                // if not an abort batch, continue propagating
-                throw ex;
+        if (batch.events().size() > 0){
+            Transaction transaction = ElasticApm.startTransaction();
+            try (final Scope scope = transaction.activate()) {
+                transaction.setName(this.pipelineId);
+                transaction.setType("pipeline");
+                transaction.setLabel("BatchSize", batch.events().size());
+                execution.compute(batch, flush, shutdown);
+            } catch (Exception ex) {
+                if (ex instanceof AbortedBatchException) {
+                    isNackBatch = true;
+                    LOGGER.info("Received signal to abort processing current batch. Terminating pipeline worker {}", Thread.currentThread().getName());
+                } else {
+                    // if not an abort batch, continue propagating
+                    throw ex;
+                }
+            } finally{
+                transaction.end();
+            }
+        }else {
+            try {
+                execution.compute(batch, flush, shutdown);
+            } catch (Exception ex) {
+                if (ex instanceof AbortedBatchException) {
+                    isNackBatch = true;
+                    LOGGER.info("Received signal to abort processing current batch. Terminating pipeline worker {}", Thread.currentThread().getName());
+                } else {
+                    // if not an abort batch, continue propagating
+                    throw ex;
+                }
             }
         }
         return isNackBatch;
