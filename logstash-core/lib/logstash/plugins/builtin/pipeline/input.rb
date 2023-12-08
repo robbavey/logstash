@@ -15,9 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
+require 'logstash/util/apm'
+
 module ::LogStash; module Plugins; module Builtin; module Pipeline; class Input < ::LogStash::Inputs::Base
   include org.logstash.plugins.pipeline.PipelineInput
+  include LogStash::Util::Apm
   java_import org.logstash.plugins.pipeline.ReceiveResponse
+
 
   config_name "pipeline"
 
@@ -61,12 +65,16 @@ module ::LogStash; module Plugins; module Builtin; module Pipeline; class Input 
     # buys us some efficiency
     begin
       stream_position = 0
-      events.forEach (lambda do |event|
-        decorate(event)
-        @queue << event
-        stream_position = stream_position + 1
-      end)
-      ReceiveResponse.completed()
+      with_span("pipeline #{address}: input #{config_name}:#{id}", events) do
+        events.forEach (lambda do |event|
+          decorate(event)
+          @queue << event
+          puts "pushing to queue #{@queue}"
+          stream_position = stream_position + 1
+        end)
+        ReceiveResponse.completed()
+      end
+
     rescue java.lang.InterruptedException, org.logstash.ackedqueue.QueueRuntimeException, IOError => e
       logger.debug? && logger.debug('queueing event failed', message: e.message, exception: e.class, backtrace: e.backtrace)
       ReceiveResponse.failed_at(stream_position, e)

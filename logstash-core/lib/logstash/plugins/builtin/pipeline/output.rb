@@ -15,8 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
+require 'logstash/util/apm'
+
 module ::LogStash; module Plugins; module Builtin; module Pipeline; class Output < ::LogStash::Outputs::Base
   include org.logstash.plugins.pipeline.PipelineOutput
+  include LogStash::Util::Apm
 
   config_name "pipeline"
 
@@ -35,8 +38,10 @@ module ::LogStash; module Plugins; module Builtin; module Pipeline; class Output
     pipeline_bus.registerSender(self, @send_to)
   end
 
-  def multi_receive(events)
-    pipeline_bus.sendEvents(self, events, ensure_delivery)
+  def multi_receive_with_apm(events)
+    with_span("pipeline #{send_to}:  output #{config_name}:#{id}", events) do
+      pipeline_bus.sendEvents(self, events, ensure_delivery)
+    end
   end
 
   def close

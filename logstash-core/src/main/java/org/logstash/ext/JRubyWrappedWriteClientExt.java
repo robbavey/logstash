@@ -32,6 +32,7 @@ import org.jruby.anno.JRubyClass;
 import org.jruby.anno.JRubyMethod;
 import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.builtin.IRubyObject;
+import org.logstash.execution.AbortedBatchException;
 import org.logstash.execution.queue.QueueWriter;
 import org.logstash.instrument.metrics.AbstractMetricExt;
 import org.logstash.instrument.metrics.AbstractNamespacedMetricExt;
@@ -40,7 +41,12 @@ import org.logstash.instrument.metrics.counter.LongCounter;
 import org.logstash.instrument.metrics.timer.TimerMetric;
 
 import static org.logstash.instrument.metrics.MetricKeys.*;
+import co.elastic.apm.api.ElasticApm;
+import co.elastic.apm.api.Scope;
+import co.elastic.apm.api.Span;
+import co.elastic.apm.api.Transaction;
 
+@SuppressWarnings("try")
 @JRubyClass(name = "WrappedWriteClient")
 public final class JRubyWrappedWriteClientExt extends RubyObject implements QueueWriter {
 
@@ -107,10 +113,19 @@ public final class JRubyWrappedWriteClientExt extends RubyObject implements Queu
     @JRubyMethod(name = {"push", "<<"}, required = 1)
     public IRubyObject push(final ThreadContext context,
                             final IRubyObject event) throws InterruptedException {
+
         final JrubyEventExtLibrary.RubyEvent rubyEvent = (JrubyEventExtLibrary.RubyEvent) event;
 
         incrementCounters(1L);
-        return executeWithTimers(() -> writeClient.doPush(context, rubyEvent));
+        Span parentSpan = ElasticApm.currentSpan();
+//        String name = parentSpan.getName();
+        Span span = parentSpan.startSpan();
+        span.setName(" write to queue");
+        try (final Scope scope = span.activate()) {
+            return executeWithTimers(() -> writeClient.doPush(context, rubyEvent));
+        } finally{
+            span.end();
+        }
     }
 
     @SuppressWarnings("unchecked")

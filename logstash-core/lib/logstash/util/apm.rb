@@ -2,7 +2,7 @@ module LogStash; module Util; module Apm
   extend self
 
   def with_span(name, events)
-    return [] if events.nil? || events.empty?
+#     return [] if events.nil? || events.empty?
     begin
       parent_span = Java::co.elastic.apm.api.ElasticApm.currentSpan
       span = parent_span.startSpan
