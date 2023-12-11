@@ -99,7 +99,7 @@ class LogStash::Outputs::Base < LogStash::Plugin
 
   public
   def multi_receive_with_apm(events)
-    with_span("output #{config_name}:#{id}", events) do
+    with_span("output #{config_name}:#{id}") do
       multi_receive(events)
     end
   end

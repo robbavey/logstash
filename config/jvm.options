@@ -71,6 +71,9 @@
 # Copy the logging context from parent threads to children
 -Dlog4j2.isThreadContextMapInheritable=true
 
+-Delastic.apm.config_file=/Users/robbavey/code/logstash/config/elasticapm.properties
+
+
 # FasterXML/jackson defaults
 #
 # Sets the maximum string length (in chars or bytes, depending on input context).

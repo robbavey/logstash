@@ -183,7 +183,7 @@ class LogStash::Filters::Base < LogStash::Plugin
 
   public
   def multi_filter_with_apm(events)
-    with_span("filter #{config_name}:#{id}", events) do
+    with_span("filter #{config_name}:#{id}") do
       multi_filter(events)
     end
   end

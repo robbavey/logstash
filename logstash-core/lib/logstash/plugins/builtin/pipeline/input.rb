@@ -22,7 +22,6 @@ module ::LogStash; module Plugins; module Builtin; module Pipeline; class Input 
   include LogStash::Util::Apm
   java_import org.logstash.plugins.pipeline.ReceiveResponse
 
-
   config_name "pipeline"
 
   config :address, :validate => :string, :required => true
@@ -65,11 +64,10 @@ module ::LogStash; module Plugins; module Builtin; module Pipeline; class Input 
     # buys us some efficiency
     begin
       stream_position = 0
-      with_span("pipeline #{address}: input #{config_name}:#{id}", events) do
+      with_span("pipeline #{address}: input #{config_name}:#{id}") do
         events.forEach (lambda do |event|
           decorate(event)
           @queue << event
-          puts "pushing to queue #{@queue}"
           stream_position = stream_position + 1
         end)
         ReceiveResponse.completed()

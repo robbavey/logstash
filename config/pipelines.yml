@@ -6,34 +6,13 @@
 #
 # Example of two pipelines:
 #
-- pipeline.id: source
-  pipeline.workers: 2
-  pipeline.batch.size: 25
-  queue.type: memory
-  config.string: "input { generator {  } } filter { sleep { id => 'source_sleep' time => 0.1 } } output { pipeline { id => 'pipeline_source' send_to => ['persisted','memory','sink_upstream'] } }"
-- pipeline.id: sink_persisted
-  pipeline.workers: 2
-  pipeline.batch.size: 25
-  queue.type: persisted
-  path.config: "/Users/robbavey/code/logstash/persisted.conf"
-- pipeline.id: sink_memory
-  pipeline.workers: 2
-  pipeline.batch.size: 25
-  queue.type: memory
-  path.config: "/Users/robbavey/code/logstash/memory.conf"
-- pipeline.id: sink_upstream
-  pipeline.workers: 2
-  pipeline.batch.size: 25
-  config.string: "input { pipeline { id => 'sink_upstream_in' address => 'sink_upstream' } } filter { sleep { id => 'upstream_sleep' time => 0.1 } } output { pipeline { id => 'pipeline_upstream' send_to => 'sink_downstream' } }"
-- pipeline.id: sink_downstream
-  pipeline.workers: 2
-  pipeline.batch.size: 25
-  config.string: "input { pipeline { id => 'sink_downstream_in' address => 'sink_downstream' } } filter { sleep { id => 'downstream_sleep' time => 0.1 } } output { stdout {}}"
-
-#- pipeline.id: conversion_with_queues
-#  queue.type: persisted
-#  path.config: "/Users/robbavey/code/logstash/remap.conf"
-
+# - pipeline.id: test
+#   pipeline.workers: 1
+#   pipeline.batch.size: 1
+#   config.string: "input { generator {} } filter { sleep { time => 1 } } output { stdout { codec => dots } }"
+# - pipeline.id: another_test
+#   queue.type: persisted
+#   path.config: "/tmp/logstash/*.config"
 #
 # Available options:
 #

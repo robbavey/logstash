@@ -39,7 +39,7 @@ module ::LogStash; module Plugins; module Builtin; module Pipeline; class Output
   end
 
   def multi_receive_with_apm(events)
-    with_span("pipeline #{send_to}:  output #{config_name}:#{id}", events) do
+    with_span("pipeline #{send_to}:  output #{config_name}:#{id}") do
       pipeline_bus.sendEvents(self, events, ensure_delivery)
     end
   end
