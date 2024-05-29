@@ -58,6 +58,7 @@ public final class JrubyMemoryWriteClientExt extends JRubyAbstractQueueWriteClie
     @Override
     protected JRubyAbstractQueueWriteClientExt doPush(final ThreadContext context,
                                                       final JrubyEventExtLibrary.RubyEvent event) throws InterruptedException {
+        System.out.println("memqueue push");
         queue.put(event);
         return this;
     }

@@ -20,13 +20,16 @@
 
 package org.logstash.config.ir.compiler;
 
-import co.elastic.apm.api.ElasticApm;
-import co.elastic.apm.api.Scope;
-import co.elastic.apm.api.Span;
+//import co.elastic.apm.api.ElasticApm;
+//import co.elastic.apm.api.Scope;
+//import co.elastic.apm.api.Span;
 
+import co.elastic.logstash.api.APM;
 import co.elastic.logstash.api.Event;
 import co.elastic.logstash.api.Filter;
 import co.elastic.logstash.api.FilterMatchListener;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 import org.jruby.Ruby;
 import org.jruby.RubyArray;
 import org.jruby.RubyClass;
@@ -80,10 +83,14 @@ public class JavaFilterDelegatorExt extends AbstractFilterDelegatorExt {
     @SuppressWarnings({"unchecked","rawtypes"})
     @Override
     protected RubyArray doMultiFilter(final RubyArray batch) {
-        Span parent = ElasticApm.currentSpan();
-        Span span = parent.startSpan();
-        span.setName(String.format("filter %s:%s", this.configName, this.getId().asJavaString()));
-        try (Scope scope = span.activate()){
+        // RWB - Span multifilter
+//        Span parent = ElasticApm.currentSpan();
+//        Span span = parent.startSpan();
+//        span.setName(String.format("filter %s:%s", this.configName, this.getId().asJavaString()));
+//        try (Scope scope = span.activate()){
+
+        Span span = APM.startTrace(String.format("filter %s:%s", this.configName, this.getId().asJavaString()));
+        try (Scope scope = span.makeCurrent()){
             List<Event> inputEvents = (List<Event>) batch.stream()
                     .map(x -> ((JrubyEventExtLibrary.RubyEvent) x).getEvent())
                     .collect(Collectors.toList());
@@ -93,9 +100,13 @@ public class JavaFilterDelegatorExt extends AbstractFilterDelegatorExt {
                 newBatch.add(JrubyEventExtLibrary.RubyEvent.newRubyEvent(RubyUtil.RUBY, (org.logstash.Event)outputEvent));
             }
             return newBatch;
-        } finally {
-            span.end();
+        } finally{
+            APM.stopTrace(span);
         }
+
+//        } finally {
+//            span.end();
+//        }
 
     }
 

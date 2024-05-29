@@ -20,6 +20,7 @@
 
 package org.logstash;
 
+import co.elastic.logstash.api.APM;
 import co.elastic.logstash.api.EventFactory;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.logging.log4j.LogManager;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static co.elastic.logstash.api.ConvertedMapSetter.SETTER_INSTANCE;
 import static org.logstash.ObjectMappers.CBOR_MAPPER;
 import static org.logstash.ObjectMappers.JSON_MAPPER;
 
@@ -80,10 +82,16 @@ public final class Event implements Cloneable, Queueable, co.elastic.logstash.ap
         this.metadata = new ConvertedMap(10);
         this.data = new ConvertedMap(10);
         this.data.putInterned(VERSION, VERSION_ONE);
+        addTraceparent(this.data);
         this.cancelled = false;
         setTimestamp(Timestamp.now());
     }
 
+    private void addTraceparent(ConvertedMap data){
+        var propagator = APM.getPropagator();
+        System.out.println("Propagating");
+        propagator.inject(io.opentelemetry.context.Context.current(), data, SETTER_INSTANCE);
+    }
     /**
      * Constructor from a map that will be copied and the copy will have its contents converted to
      * Java objects.
@@ -102,6 +110,7 @@ public final class Event implements Cloneable, Queueable, co.elastic.logstash.ap
     @SuppressWarnings("unchecked")
     public Event(ConvertedMap data) {
         this.data = data;
+        addTraceparent(this.data);
         if (!this.data.containsKey(VERSION)) {
             this.data.putInterned(VERSION, VERSION_ONE);
         }

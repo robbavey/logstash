@@ -176,6 +176,7 @@ public class JavaInputDelegatorExt extends RubyObject {
 
         @Override
         public void push(Map<String, Object> event) {
+            System.out.println("Decorating event: " + event);
             for (Function<Map<String, Object>, Map<String, Object>> action : inputActions) {
                 event = action.apply(event);
             }

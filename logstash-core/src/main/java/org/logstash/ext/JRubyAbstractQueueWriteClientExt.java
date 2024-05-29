@@ -43,6 +43,7 @@ public abstract class JRubyAbstractQueueWriteClientExt extends RubyBasicObject i
     @JRubyMethod(name = {"push", "<<"}, required = 1)
     public final JRubyAbstractQueueWriteClientExt rubyPush(final ThreadContext context,
                                                            final IRubyObject event) throws InterruptedException {
+        System.out.println("pushing to " + this.toString());
         doPush(context, (JrubyEventExtLibrary.RubyEvent) event);
         return this;
     }
@@ -51,6 +52,7 @@ public abstract class JRubyAbstractQueueWriteClientExt extends RubyBasicObject i
     @JRubyMethod(name = "push_batch", required = 1)
     public final JRubyAbstractQueueWriteClientExt rubyPushBatch(final ThreadContext context,
                                                                 final IRubyObject batch) throws InterruptedException {
+        System.out.println("pushing batch to " + this.toString());
         doPushBatch(context, (Collection<JrubyEventExtLibrary.RubyEvent>) batch);
         return this;
     }

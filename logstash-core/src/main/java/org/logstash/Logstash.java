@@ -22,6 +22,18 @@ package org.logstash;
 
 import co.elastic.apm.attach.ElasticApmAttacher;
 
+import co.elastic.logstash.api.APM;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanBuilder;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.context.propagation.TextMapGetter;
+
+
 import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
@@ -61,6 +73,12 @@ public final class Logstash implements Runnable, AutoCloseable {
      */
     public static void main(final String... args) {
         ElasticApmAttacher.attach();
+
+//        var openTelemetry = GlobalOpenTelemetry.get();
+//        var tracer = openTelemetry.getTracer("logstash", "8.14.0");
+
+        APM.setup();
+
         final String lsHome = System.getenv("LS_HOME");
         if (lsHome == null) {
             throw new IllegalStateException(

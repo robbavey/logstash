@@ -20,16 +20,16 @@
 
 package org.logstash.config.ir.compiler;
 
-import co.elastic.apm.api.ElasticApm;
-import co.elastic.apm.api.Scope;
-import co.elastic.apm.api.Span;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import co.elastic.logstash.api.APM;
 import co.elastic.logstash.api.Event;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 import org.jruby.Ruby;
 import org.jruby.RubyClass;
 import org.jruby.RubyString;
@@ -94,14 +94,21 @@ public final class JavaOutputDelegatorExt extends AbstractOutputDelegatorExt {
 
     void outputRubyEvents(Collection<JrubyEventExtLibrary.RubyEvent> e) {
         List<Event> events = e.stream().map(JrubyEventExtLibrary.RubyEvent::getEvent).collect(Collectors.toList());
-        Span parent = ElasticApm.currentSpan();
-        Span span = parent.startSpan();
-        span.setName(String.format("output %s:%s", this.configName, this.getId().asJavaString()));
-        try (Scope scope = span.activate()){
+        Span span = APM.startTrace(String.format("output %s:%s", this.configName, this.getId().asJavaString()));
+        try (Scope scope = span.makeCurrent()){
             output.output(events);
-        } finally {
-            span.end();
+        } finally{
+            APM.stopTrace(span);
         }
+        // RWB Span
+        //        Span parent = ElasticApm.currentSpan();
+//        Span span = parent.startSpan();
+//        span.setName(String.format("output %s:%s", this.configName, this.getId().asJavaString()));
+//        try (Scope scope = span.activate()){
+//            output.output(events);
+//        } finally {
+//            span.end();
+//        }
     }
 
     void outputClose() {

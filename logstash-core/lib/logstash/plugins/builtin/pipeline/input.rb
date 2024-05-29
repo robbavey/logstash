@@ -64,6 +64,7 @@ module ::LogStash; module Plugins; module Builtin; module Pipeline; class Input 
     # buys us some efficiency
     begin
       stream_position = 0
+
       with_span("pipeline #{address}: input #{config_name}:#{id}") do
         events.forEach (lambda do |event|
           decorate(event)

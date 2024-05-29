@@ -23,6 +23,9 @@ package org.logstash.ext;
 import java.util.Collection;
 import java.util.Map;
 
+import co.elastic.logstash.api.APM;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 import org.jruby.Ruby;
 import org.jruby.RubyArray;
 import org.jruby.RubyClass;
@@ -32,6 +35,8 @@ import org.jruby.anno.JRubyClass;
 import org.jruby.anno.JRubyMethod;
 import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.builtin.IRubyObject;
+import org.logstash.ConvertedMap;
+import org.logstash.Event;
 import org.logstash.execution.queue.QueueWriter;
 import org.logstash.instrument.metrics.AbstractMetricExt;
 import org.logstash.instrument.metrics.AbstractNamespacedMetricExt;
@@ -39,11 +44,12 @@ import org.logstash.instrument.metrics.MetricKeys;
 import org.logstash.instrument.metrics.counter.LongCounter;
 import org.logstash.instrument.metrics.timer.TimerMetric;
 
+import static co.elastic.logstash.api.ConvertedMapSetter.SETTER_INSTANCE;
 import static org.logstash.instrument.metrics.MetricKeys.*;
-import co.elastic.apm.api.ElasticApm;
-import co.elastic.apm.api.Scope;
-import co.elastic.apm.api.Span;
-import co.elastic.apm.api.Transaction;
+//import co.elastic.apm.api.ElasticApm;
+//import co.elastic.apm.api.Scope;
+//import co.elastic.apm.api.Span;
+//import co.elastic.apm.api.Transaction;
 
 @SuppressWarnings("try")
 @JRubyClass(name = "WrappedWriteClient")
@@ -52,7 +58,7 @@ public final class JRubyWrappedWriteClientExt extends RubyObject implements Queu
     private static final long serialVersionUID = 1L;
 
     private JRubyAbstractQueueWriteClientExt writeClient;
-
+    private String pipelineId;
     private transient LongCounter eventsMetricsCounter;
 
     private transient TimerMetric eventsMetricsTime;
@@ -81,7 +87,7 @@ public final class JRubyWrappedWriteClientExt extends RubyObject implements Queu
                                                  final AbstractMetricExt metric,
                                                  final IRubyObject pluginId) {
         this.writeClient = queueWriteClientExt;
-
+        this.pipelineId = pipelineId;
         final RubySymbol pipelineIdSym = getRuntime().newSymbol(pipelineId);
         final RubySymbol pluginIdSym = pluginId.asString().intern();
 
@@ -115,14 +121,28 @@ public final class JRubyWrappedWriteClientExt extends RubyObject implements Queu
         final JrubyEventExtLibrary.RubyEvent rubyEvent = (JrubyEventExtLibrary.RubyEvent) event;
 
         incrementCounters(1L);
-        Span parentSpan = ElasticApm.currentSpan();
-        Span span = parentSpan.startSpan();
-        span.setName(" write to queue");
-        try (final Scope scope = span.activate()) {
+
+        System.out.println("Pushing");
+        Span span = APM.startTrace(this.pipelineId + ": input");
+        System.out.println("The parent span should be " + span);
+        span.setAttribute("type", "pipeline");
+//        span.setAttribute("BatchSize", batch.events().size());
+        try (Scope scope = span.makeCurrent()){
+            addTraceparent(rubyEvent.getEvent());
+//        Span parentSpan = ElasticApm.currentSpan();
+//        Span span = parentSpan.startSpan();
+//        span.setName(" write to queue");
+//        try (final Scope scope = span.activate()) {
             return executeWithTimers(() -> writeClient.doPush(context, rubyEvent));
         } finally{
             span.end();
         }
+    }
+
+    private void addTraceparent(Event event){
+        var propagator = APM.getPropagator();
+        System.out.println("Propagating");
+        propagator.inject(io.opentelemetry.context.Context.current(), event.getData(), SETTER_INSTANCE);
     }
 
     @SuppressWarnings("unchecked")
